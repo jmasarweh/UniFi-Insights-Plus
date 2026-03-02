@@ -17,6 +17,59 @@ body {
   box-sizing: border-box;
 }
 
+/* Sankey column header badge button */
+.sankey-col-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  line-height: 1;
+  font-family: inherit;
+  transition: filter 0.15s;
+}
+.sankey-col-badge:hover { filter: brightness(1.15); }
+.sankey-col-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* Sankey custom dropdown menu */
+.sankey-dim-menu {
+  min-width: 150px;
+  --sankey-menu-bg: #111827;
+}
+[data-theme="light"] .sankey-dim-menu { --sankey-menu-bg: #fff; }
+.sankey-dim-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: #d1d5db;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.sankey-dim-menu-item:first-child { border-radius: 7px 7px 0 0; }
+.sankey-dim-menu-item:last-child { border-radius: 0 0 7px 7px; }
+.sankey-dim-menu-item:hover { background: rgba(255,255,255,0.08); }
+.sankey-dim-menu-item.active {
+  background: var(--badge-color);
+  color: #fff;
+  font-weight: 600;
+}
+[data-theme="light"] .sankey-dim-menu-item { color: #374151; }
+[data-theme="light"] .sankey-dim-menu-item:hover { background: rgba(0,0,0,0.06); }
+[data-theme="light"] .sankey-dim-menu-item.active { color: #fff; }
+
 /* Clickable IP cells — teal hover on all child text */
 .ip-clickable:hover span { color: #2dd4bf; /* teal-400 */ }
 

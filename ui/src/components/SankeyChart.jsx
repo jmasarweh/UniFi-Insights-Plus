@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import { fetchFlowGraph } from '../api'
 import { formatNumber, formatServiceName, getInterfaceName } from '../utils'
@@ -38,6 +38,30 @@ const getIfaceBadgeClass = (iface, wanList = []) => {
   return 'bg-gray-500/15 text-gray-400 border-gray-500/30'
 }
 
+/** Estimate label height for collision detection (matches renderLabel branching) */
+function estimateLabelHeight(node, data) {
+  const nodeH = node.y1 - node.y0
+  if (nodeH <= 6) return 0 // won't render
+
+  const isOther = node.label === 'Other'
+
+  // Interface badge
+  if ((node.type === 'interface_in' || node.type === 'interface_out') && !isOther) return 22
+
+  // IP nodes with extras
+  const isIp = (node.type === 'src_ip' || node.type === 'dst_ip') && !isOther
+  if (isIp) {
+    const deviceName = data?.device_names?.[node.label]
+    const vlan = data?.gateway_vlans?.[node.label]
+    const vpnBadge = data?.vpn_badges?.[node.label]
+    const hasExtra = deviceName || vlan != null || vpnBadge
+    if (hasExtra && nodeH > 12) return deviceName ? 32 : 24
+  }
+
+  // Default text label
+  return 14
+}
+
 export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFilter, hostIp }) {
   const [dims, setDims] = useState(['src_ip', 'dst_port', 'dst_ip'])
   const [topN, setTopN] = useState(15)
@@ -46,6 +70,7 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
   const [error, setError] = useState(null)
   const [tooltip, setTooltip] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [dimMenu, setDimMenu] = useState(null) // { dimIndex, x, y, color }
   const svgRef = useRef(null)
   const containerRef = useRef(null)
   const [chartWidth, setChartWidth] = useState(0)
@@ -132,6 +157,41 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
     return [...new Set(layout.nodes.map(n => n.x0))].sort((a, b) => a - b)
   }, [layout])
 
+  // Label collision detection — hide labels that overlap higher-priority (larger) nodes
+  const hiddenLabels = useMemo(() => {
+    if (!layout || !sortedCols.length) return new Set()
+    const hidden = new Set()
+    const GAP = 3 // px gap between labels to prevent touching
+
+    // Process each column independently
+    for (const colX of sortedCols) {
+      const colNodes = layout.nodes.filter(n => n.x0 === colX)
+      // Sort by value descending — larger nodes get label priority
+      colNodes.sort((a, b) => b.value - a.value)
+
+      const placed = [] // array of [top, bottom] for placed labels
+
+      for (const node of colNodes) {
+        const h = estimateLabelHeight(node, data)
+        if (h === 0) continue // won't render anyway
+
+        const cy = (node.y0 + node.y1) / 2
+        const halfH = h / 2
+        const top = cy - halfH - GAP
+        const bottom = cy + halfH + GAP
+
+        // Check overlap with already-placed labels
+        const overlaps = placed.some(([pt, pb]) => top < pb && bottom > pt)
+        if (overlaps) {
+          hidden.add(node.index)
+        } else {
+          placed.push([top, bottom])
+        }
+      }
+    }
+    return hidden
+  }, [layout, sortedCols, data])
+
   const getNodeColor = (node) => {
     if (node.label === 'Other') return OTHER_COLOR.node
     if (!sortedCols.length) return COLUMN_COLORS[0].node
@@ -160,7 +220,7 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
     })
   }
 
-  // Column headers (dimension labels) positioned above each column
+  // Column headers with dimension info for inline selects
   const columnHeaders = useMemo(() => {
     if (!layout) return []
     const cols = [...new Set(layout.nodes.map(n => n.x0))].sort((a, b) => a - b)
@@ -168,7 +228,6 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
       const nodesInCol = layout.nodes.filter(n => n.x0 === x0)
       const x1 = nodesInCol[0]?.x1 || x0 + 12
       const center = (x0 + x1) / 2
-      // Anchor left/right headers to SVG edges so they don't clip
       const isFirst = i === 0
       const isLast = i === cols.length - 1
       return {
@@ -176,12 +235,17 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
         anchor: isFirst ? 'start' : isLast ? 'end' : 'middle',
         label: dimLabel(dims[i]),
         color: (COLUMN_COLORS[i] || COLUMN_COLORS[0]).node,
+        dimIndex: i,
+        isLast,
       }
     })
   }, [layout, dims])
 
   // Render node label based on type
   const renderLabel = (node, isDimmed) => {
+    // Skip if collision-hidden
+    if (hiddenLabels.has(node.index)) return null
+
     const nodeH = node.y1 - node.y0
     if (nodeH <= 6) return null
 
@@ -271,33 +335,43 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
     )
   }
 
+  // Close dimension menu on click outside or scroll
+  const closeDimMenu = useCallback(() => setDimMenu(null), [])
+  useEffect(() => {
+    if (!dimMenu) return
+    const handler = (e) => {
+      if (e.target.closest?.('.sankey-dim-menu') || e.target.closest?.('.sankey-col-badge')) return
+      closeDimMenu()
+    }
+    document.addEventListener('pointerdown', handler)
+    const container = containerRef.current
+    if (container) container.addEventListener('scroll', closeDimMenu)
+    return () => {
+      document.removeEventListener('pointerdown', handler)
+      if (container) container.removeEventListener('scroll', closeDimMenu)
+    }
+  }, [dimMenu, closeDimMenu])
+
+  // Open dimension menu positioned fixed to viewport (avoids overflow clipping)
+  const openDimMenu = (dimIndex, color, e) => {
+    const btnRect = e.currentTarget.getBoundingClientRect()
+    setDimMenu({
+      dimIndex,
+      color,
+      left: btnRect.left,
+      right: window.innerWidth - btnRect.right,
+      top: btnRect.bottom + 4,
+      isRight: dimIndex === (columnHeaders.length - 1),
+    })
+  }
+
   return (
     <div className={`${isFullscreen ? 'fixed inset-0 z-50 bg-gray-950' : 'border border-gray-800 rounded-lg'} flex flex-col h-full overflow-hidden`}>
-      {/* Header — single row, matched height with TopIPPairs */}
+      {/* Header — cleaned up: title, top-n, capped badge, fullscreen */}
       <div className="flex flex-wrap h-auto min-h-[2.75rem] items-center gap-2 sm:gap-3 px-4 py-2 sm:py-0 border-b border-gray-800 shrink-0 overflow-x-auto">
         <h3 className="hidden sm:block text-xs font-semibold text-gray-300 uppercase tracking-wider mr-1">Flow Graph</h3>
 
         <div className="hidden sm:block h-5 w-px bg-gray-700" />
-
-        {/* Dimension selectors with labels */}
-        {dims.map((d, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <span className="hidden sm:inline text-[10px] text-gray-500 uppercase tracking-wider">{['Left', 'Center', 'Right'][i]}</span>
-            <select
-              value={d}
-              onChange={e => setDim(i, e.target.value)}
-              className="bg-gray-800/50 text-gray-300 text-xs rounded px-2 py-0.5 border border-gray-700 focus:outline-none focus:border-gray-500 cursor-pointer"
-            >
-              {DIMENSION_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value} disabled={dims.includes(opt.value) && dims[i] !== opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
-
-        <div className="h-5 w-px bg-gray-700" />
 
         <div className="flex items-center gap-1.5">
           <label htmlFor="sankey-top-n" className="text-[10px] text-gray-500 uppercase tracking-wider" title="Number of top values per dimension">Top N</label>
@@ -335,21 +409,33 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
               ref={svgRef}
               width={layout.width}
               height={layout.height}
+              style={{ overflow: 'visible' }}
             >
-              {/* Column headers */}
-              {columnHeaders.map((col, i) => (
-                <text
-                  key={i}
-                  x={col.x}
-                  y={12}
-                  textAnchor={col.anchor}
-                  className="font-semibold uppercase"
-                  fill={col.color}
-                  style={{ fontSize: '10px', letterSpacing: '0.05em', pointerEvents: 'none' }}
-                >
-                  {col.label}
-                </text>
-              ))}
+              {/* Column headers — badge buttons that open custom dropdown */}
+              {columnHeaders.map((col) => {
+                const foW = 140
+                const foX = col.isLast ? col.x - foW : col.anchor === 'middle' ? col.x - foW / 2 : col.x
+                return (
+                  <foreignObject key={col.dimIndex} x={foX} y={0} width={foW} height={HEADER_HEIGHT} style={{ overflow: 'visible' }}>
+                    <div className={`flex items-center h-full ${col.isLast ? 'justify-end' : col.anchor === 'middle' ? 'justify-center' : 'justify-start'}`}>
+                      <button
+                        type="button"
+                        className="sankey-col-badge"
+                        style={{ backgroundColor: col.color }}
+                        onClick={e => dimMenu?.dimIndex === col.dimIndex ? closeDimMenu() : openDimMenu(col.dimIndex, col.color, e)}
+                        aria-haspopup="listbox"
+                        aria-expanded={dimMenu?.dimIndex === col.dimIndex}
+                        aria-controls={dimMenu?.dimIndex === col.dimIndex ? `dim-menu-${col.dimIndex}` : undefined}
+                        aria-label={`${col.label} dimension selector`}
+                      >
+                        {col.isLast && <svg className="w-2 h-2 shrink-0" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true"><path d="M0 0l5 6 5-6z" /></svg>}
+                        <span className="sankey-col-label">{col.label}</span>
+                        {!col.isLast && <svg className="w-2 h-2 shrink-0" viewBox="0 0 10 6" fill="currentColor" aria-hidden="true"><path d="M0 0l5 6 5-6z" /></svg>}
+                      </button>
+                    </div>
+                  </foreignObject>
+                )
+              })}
 
               {/* Links */}
               <g fill="none">
@@ -408,9 +494,44 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
                 {tooltip.text}
               </div>
             )}
+
           </div>
         )}
       </div>
+
+      {/* Custom dimension dropdown menu — fixed to viewport so overflow can't clip it */}
+      {dimMenu && (() => {
+        const availableOptions = DIMENSION_OPTIONS.filter(
+          opt => opt.value === dims[dimMenu.dimIndex] || !dims.includes(opt.value)
+        )
+        const menuStyle = dimMenu.isRight
+          ? { position: 'fixed', right: dimMenu.right, top: dimMenu.top }
+          : { position: 'fixed', left: dimMenu.left, top: dimMenu.top }
+        return (
+          <div
+            id={`dim-menu-${dimMenu.dimIndex}`}
+            role="listbox"
+            aria-label="Dimension selector"
+            className="sankey-dim-menu z-[60] py-1 rounded-lg shadow-xl border"
+            style={{ ...menuStyle, borderColor: dimMenu.color, backgroundColor: 'var(--sankey-menu-bg, #111827)' }}
+            onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeDimMenu() } }}
+          >
+            {availableOptions.map(opt => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={opt.value === dims[dimMenu.dimIndex]}
+                key={opt.value}
+                onClick={() => { setDim(dimMenu.dimIndex, opt.value); closeDimMenu() }}
+                className={`sankey-dim-menu-item ${opt.value === dims[dimMenu.dimIndex] ? 'active' : ''}`}
+                style={{ '--badge-color': dimMenu.color }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )
+      })()}
     </div>
   )
 }
