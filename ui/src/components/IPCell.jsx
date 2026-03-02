@@ -25,8 +25,8 @@ export default function IPCell({ ip, port, deviceName, vlan, networkLabel, subli
             {badge}
           </div>
         )}
-        <span className="inline-flex items-baseline gap-0.5 min-w-0">
-          <span className={`${deviceName || badge ? 'text-gray-500 text-[11px]' : 'text-gray-300 text-[13px]'} truncate`}>{ip}</span>
+        <span className="inline-flex items-baseline gap-0.5 min-w-0 max-w-full">
+          <span className={`${deviceName || badge ? 'text-gray-500 text-[11px]' : 'text-gray-300 text-[13px]'} truncate`} title={ip}>{ip}</span>
           {port && <span className={`${deviceName || badge ? 'text-gray-600 text-[11px]' : 'text-gray-500'}`}>:{port}</span>}
         </span>
         {subline && <div className="text-[11px] text-gray-500 truncate" title={subline}>{subline}</div>}
@@ -35,8 +35,8 @@ export default function IPCell({ ip, port, deviceName, vlan, networkLabel, subli
   }
 
   return (
-    <span className="inline-flex items-baseline gap-0.5 min-w-0">
-      <span className="text-gray-300 truncate">{ip}</span>
+    <span className="inline-flex items-baseline gap-0.5 min-w-0 max-w-full">
+      <span className="text-gray-300 truncate" title={ip}>{ip}</span>
       {port && <span className="text-gray-500">:{port}</span>}
     </span>
   )
