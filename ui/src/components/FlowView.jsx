@@ -4,6 +4,7 @@ import { ACTION_STYLES, DIRECTION_ICONS, DIRECTION_COLORS } from '../utils'
 import SankeyChart from './SankeyChart'
 import TopIPPairs from './TopIPPairs'
 import HostSlidePanel from './HostSlidePanel'
+import DateRangePicker from './DateRangePicker'
 
 const ZoneMatrix = lazy(() => import('./ZoneMatrix'))
 
@@ -31,6 +32,8 @@ export default function FlowView({ maxFilterDays }) {
   const [expandedRow, setExpandedRow] = useState(null)
   const [hostSearchInput, setHostSearchInput] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(false)
+  const [timeFrom, setTimeFrom] = useState(null)
+  const [timeTo, setTimeTo] = useState(null)
 
   const toggleAction = (action) => {
     setActiveActions(prev => {
@@ -50,8 +53,11 @@ export default function FlowView({ maxFilterDays }) {
     })
   }
 
+  const isCustomTime = !!(timeFrom || timeTo)
   const filters = {
-    time_range: timeRange,
+    time_range: isCustomTime ? null : timeRange,
+    time_from: timeFrom,
+    time_to: timeTo,
     rule_action: activeActions.length === ACTIONS.length ? null : activeActions.join(','),
     direction: activeDirections.length === DIRECTIONS.length ? null : activeDirections.join(','),
   }
@@ -103,7 +109,7 @@ export default function FlowView({ maxFilterDays }) {
   const activeFilterCount = [
     activeActions.length !== ACTIONS.length,
     activeDirections.length !== DIRECTIONS.length,
-    timeRange !== '24h',
+    isCustomTime || timeRange !== '24h',
     hostSearchInput,
   ].filter(Boolean).length
 
@@ -170,9 +176,9 @@ export default function FlowView({ maxFilterDays }) {
           {visibleRanges.map(tr => (
             <button
               key={tr}
-              onClick={() => setTimeRange(tr)}
+              onClick={() => { setTimeRange(tr); setTimeFrom(null); setTimeTo(null) }}
               className={`px-2 py-1 rounded text-xs font-medium transition-all ${
-                timeRange === tr
+                !isCustomTime && timeRange === tr
                   ? 'bg-gray-700 text-white'
                   : 'text-gray-400 hover:text-gray-300'
               }`}
@@ -180,28 +186,42 @@ export default function FlowView({ maxFilterDays }) {
               {tr}
             </button>
           ))}
-        </div>
-
-        <div className="hidden sm:block h-5 w-px bg-gray-700" />
-
-        {/* IP Search */}
-        <div className="flex items-center gap-1">
-          <input
-            type="text"
-            placeholder="Search IP..."
-            value={hostSearchInput}
-            onChange={e => setHostSearchInput(e.target.value)}
-            onKeyDown={handleHostSearch}
-            className="w-full sm:w-36 bg-gray-800/50 text-gray-300 text-xs rounded px-2 py-1 border border-gray-700 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+          <DateRangePicker
+            isActive={isCustomTime}
+            timeFrom={timeFrom}
+            timeTo={timeTo}
+            maxFilterDays={maxFilterDays}
+            onApply={({ time_from, time_to }) => {
+              setTimeFrom(time_from)
+              setTimeTo(time_to)
+            }}
+            onClear={() => {
+              setTimeFrom(null)
+              setTimeTo(null)
+              setTimeRange('24h')
+            }}
           />
-          {expandedRow && (
-            <button
-              onClick={() => { setExpandedRow(null); setHostSearchInput('') }}
-              className="text-gray-500 hover:text-gray-300 text-xs px-1"
-              title="Clear host search"
-            >&times;</button>
-          )}
         </div>
+
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setTimeRange('24h')
+              setTimeFrom(null)
+              setTimeTo(null)
+              setActiveActions([...ACTIONS])
+              setActiveDirections([...DIRECTIONS])
+              setSankeyFilter(null)
+              setZoneFilter(null)
+              setExpandedRow(null)
+              setHostSearchInput('')
+            }}
+            className="shrink-0 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            Reset
+          </button>
+        )}
 
         <button
           onClick={refresh}
@@ -241,6 +261,10 @@ export default function FlowView({ maxFilterDays }) {
               onNodeClick={handleSankeyNodeClickWithHost}
               activeFilter={sankeyFilter}
               hostIp={expandedRow?.ip}
+              hostSearchInput={hostSearchInput}
+              onHostSearchChange={setHostSearchInput}
+              onHostSearch={handleHostSearch}
+              onHostSearchClear={() => { setExpandedRow(null); setHostSearchInput('') }}
             />
           )}
           {activePanel === 'zone-matrix' && (

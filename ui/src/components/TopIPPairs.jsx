@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { fetchIPPairs } from '../api'
 import { formatNumber, formatServiceName, resolveIpSublines } from '../utils'
 import IPCell from './IPCell'
+import InfoTooltip from './InfoTooltip'
 
 // Sankey node type → API param name mapping
 const SANKEY_PARAM_MAP = {
@@ -56,7 +57,7 @@ export default function TopIPPairs({ filters, refreshKey, sankeyFilter, onClearS
       .catch(err => console.error('IP pairs fetch failed:', err))
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [filters.time_range, filters.rule_action, filters.direction, sankeyKey, zoneKey, limit, refreshKey])
+  }, [filters.time_range, filters.time_from, filters.time_to, filters.rule_action, filters.direction, sankeyKey, zoneKey, limit, refreshKey])
 
   const drillToLogs = (pair) => {
     window.dispatchEvent(new CustomEvent('drillToLogs', {
@@ -66,6 +67,8 @@ export default function TopIPPairs({ filters, refreshKey, sankeyFilter, onClearS
         dst_port: pair.dst_port,
         service: pair.service_name,
         time_range: filters.time_range,
+        time_from: filters.time_from || undefined,
+        time_to: filters.time_to || undefined,
       }
     }))
   }
@@ -73,7 +76,13 @@ export default function TopIPPairs({ filters, refreshKey, sankeyFilter, onClearS
   return (
     <div className="border border-gray-800 rounded-lg flex flex-col h-full">
       <div className="flex h-11 items-center justify-between px-4 border-b border-gray-800 shrink-0">
-        <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Top IP Pairs</h3>
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Top IP Pairs</h3>
+          <InfoTooltip>
+            <p>Click an IP address to open the host details panel.</p>
+            <p>Click anywhere else on a row to drill down into the raw logs for that flow.</p>
+          </InfoTooltip>
+        </div>
         <div className="flex items-center gap-2">
           <label className="text-[10px] text-gray-500">Show</label>
           <select

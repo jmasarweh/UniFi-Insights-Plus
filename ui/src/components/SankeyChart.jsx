@@ -3,6 +3,7 @@ import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import { fetchFlowGraph } from '../api'
 import { formatNumber, formatServiceName, getInterfaceName } from '../utils'
 import FullscreenToggle from './FullscreenToggle'
+import InfoTooltip from './InfoTooltip'
 
 const DIMENSION_OPTIONS = [
   { value: 'src_ip', label: 'Source IP' },
@@ -62,7 +63,7 @@ function estimateLabelHeight(node, data) {
   return 14
 }
 
-export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFilter, hostIp }) {
+export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFilter, hostIp, hostSearchInput, onHostSearchChange, onHostSearch, onHostSearchClear }) {
   const [dims, setDims] = useState(['src_ip', 'dst_port', 'dst_ip'])
   const [topN, setTopN] = useState(15)
   const [data, setData] = useState(null)
@@ -90,20 +91,24 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
   }, [])
 
   useEffect(() => {
+    // Guard: skip fetch when topN is empty or invalid (user mid-typing)
+    const n = Number(topN)
+    if (!n || n < 1) return
+
     let cancelled = false
     setLoading(true)
     setError(null)
     fetchFlowGraph({
       ...filters,
       dimensions: dims.join(','),
-      top_n: topN,
+      top_n: n,
       ip: hostIp || undefined,
     })
       .then(d => { if (!cancelled) setData(d) })
       .catch(err => { if (!cancelled) setError(err.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [filters.time_range, filters.rule_action, filters.direction, dims, topN, hostIp, refreshKey])
+  }, [filters.time_range, filters.time_from, filters.time_to, filters.rule_action, filters.direction, dims, topN, hostIp, refreshKey])
 
   const setDim = (index, value) => {
     setDims(prev => {
@@ -343,11 +348,14 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
       if (e.target.closest?.('.sankey-dim-menu') || e.target.closest?.('.sankey-col-badge')) return
       closeDimMenu()
     }
+    const escHandler = (e) => { if (e.key === 'Escape') closeDimMenu() }
     document.addEventListener('pointerdown', handler)
+    document.addEventListener('keydown', escHandler)
     const container = containerRef.current
     if (container) container.addEventListener('scroll', closeDimMenu)
     return () => {
       document.removeEventListener('pointerdown', handler)
+      document.removeEventListener('keydown', escHandler)
       if (container) container.removeEventListener('scroll', closeDimMenu)
     }
   }, [dimMenu, closeDimMenu])
@@ -369,22 +377,55 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
     <div className={`${isFullscreen ? 'fixed inset-0 z-50 bg-gray-950' : 'border border-gray-800 rounded-lg'} flex flex-col h-full overflow-hidden`}>
       {/* Header — cleaned up: title, top-n, capped badge, fullscreen */}
       <div className="flex flex-wrap h-auto min-h-[2.75rem] items-center gap-2 sm:gap-3 px-4 py-2 sm:py-0 border-b border-gray-800 shrink-0 overflow-x-auto">
-        <h3 className="hidden sm:block text-xs font-semibold text-gray-300 uppercase tracking-wider mr-1">Flow Graph</h3>
+        <div className="flex items-center gap-1">
+          <h3 className="hidden sm:block text-xs font-semibold text-gray-300 uppercase tracking-wider">Flow Graph</h3>
+          <InfoTooltip>
+            <p>Click a column header badge to change its dimension.</p>
+            <p>Click a node bar to filter the IP Pairs table below.</p>
+          </InfoTooltip>
+        </div>
 
         <div className="hidden sm:block h-5 w-px bg-gray-700" />
 
         <div className="flex items-center gap-1.5">
-          <label htmlFor="sankey-top-n" className="text-[10px] text-gray-500 uppercase tracking-wider" title="Number of top values per dimension">Top N</label>
+          <label htmlFor="sankey-top-n" className="text-[10px] text-gray-400 uppercase tracking-wider" title="Number of top values per dimension">Top N</label>
           <input
             id="sankey-top-n"
             type="number"
             min={3}
             max={50}
             value={topN}
-            onChange={e => setTopN(Math.max(3, Math.min(50, Number(e.target.value) || 3)))}
+            onChange={e => setTopN(e.target.value === '' ? '' : Number(e.target.value))}
+            onBlur={() => setTopN(v => Math.max(3, Math.min(50, Number(v) || 3)))}
             className="w-12 bg-gray-800/50 text-gray-300 text-xs rounded px-1.5 py-0.5 border border-gray-700 text-center focus:outline-none focus:border-gray-500"
           />
         </div>
+
+        {onHostSearch && (
+          <>
+            <div className="hidden sm:block h-5 w-px bg-gray-700" />
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                placeholder="Search IP..."
+                aria-label="Search by IP address"
+                value={hostSearchInput || ''}
+                onChange={e => onHostSearchChange(e.target.value)}
+                onKeyDown={onHostSearch}
+                className="w-full sm:w-36 bg-gray-800/50 text-gray-300 text-xs rounded px-2 py-0.5 border border-gray-700 placeholder-gray-600 focus:outline-none focus:border-gray-500"
+              />
+              {(hostSearchInput || hostIp) && (
+                <button
+                  type="button"
+                  onClick={onHostSearchClear}
+                  className="text-gray-500 hover:text-gray-300 text-xs px-1"
+                  title="Clear host search"
+                  aria-label="Clear host search"
+                >&times;</button>
+              )}
+            </div>
+          </>
+        )}
 
         {data?.meta?.capped && (
           <span className="text-[10px] text-amber-400">
@@ -514,7 +555,6 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
             aria-label="Dimension selector"
             className="sankey-dim-menu z-[60] py-1 rounded-lg shadow-xl border"
             style={{ ...menuStyle, borderColor: dimMenu.color, backgroundColor: 'var(--sankey-menu-bg, #111827)' }}
-            onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeDimMenu() } }}
           >
             {availableOptions.map(opt => (
               <button
