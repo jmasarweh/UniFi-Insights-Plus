@@ -70,6 +70,47 @@ body {
 [data-theme="light"] .sankey-dim-menu-item:hover { background: rgba(0,0,0,0.06); }
 [data-theme="light"] .sankey-dim-menu-item.active { color: #fff; }
 
+/* Info tooltip (ⓘ button + popover) */
+.info-tooltip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: #3b82f6;
+  cursor: pointer;
+  border-radius: 9999px;
+  transition: opacity 0.15s;
+  opacity: 0.7;
+  vertical-align: middle;
+}
+.info-tooltip-btn:hover { opacity: 1; }
+.info-tooltip-popup {
+  position: fixed;
+  z-index: 70;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #d1d5db;
+  font-size: 11px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  white-space: normal;
+}
+.info-tooltip-popup p { margin: 0 0 6px; }
+.info-tooltip-popup p:last-child { margin-bottom: 0; }
+[data-theme="light"] .info-tooltip-btn { color: #2563eb; }
+[data-theme="light"] .info-tooltip-popup {
+  background: #fff;
+  border-color: #e5e7eb;
+  color: #374151;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
+
 /* Clickable IP cells — teal hover on all child text */
 .ip-clickable:hover span { color: #2dd4bf; /* teal-400 */ }
 

@@ -15,9 +15,9 @@ import { isVpnInterface } from './vpnUtils'
 
 const TABS = [
   { id: 'logs', label: 'Log Stream', shortLabel: 'Stream' },
-  { id: 'dashboard', label: 'Dashboard', shortLabel: 'Dashboard' },
   { id: 'flow-view', label: 'Flow View', shortLabel: 'Flow' },
   { id: 'threat-map', label: 'Threat Map', shortLabel: 'Map' },
+  { id: 'dashboard', label: 'Dashboard', shortLabel: 'Dashboard' },
 ]
 
 function formatShortDate(isoStr) {

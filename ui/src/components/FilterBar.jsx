@@ -626,27 +626,30 @@ export default function FilterBar({ filters, onChange, maxFilterDays }) {
             <button onClick={() => setTextSearch('')} className="absolute right-2 top-1.5 text-gray-400 hover:text-gray-200 text-xs">✕</button>
           )}
         </div>
-        <button
-          onClick={() => {
-            setIpSearch('')
-            setRuleSearch('')
-            setTextSearch('')
-            setServiceSearch('')
-            setSelectedServices([])
-            setInterfaceSearch('')
-            setSelectedInterfaces([])
-            setCountrySearch('')
-            setAsnSearch('')
-            setDstPortSearch('')
-            setSrcPortSearch('')
-            setProtocolSearch('')
-            setSelectedProtocols([])
-            wrappedOnChange(RESET_FILTERS)
-          }}
-          className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
-        >
-          Reset
-        </button>
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setIpSearch('')
+              setRuleSearch('')
+              setTextSearch('')
+              setServiceSearch('')
+              setSelectedServices([])
+              setInterfaceSearch('')
+              setSelectedInterfaces([])
+              setCountrySearch('')
+              setAsnSearch('')
+              setDstPortSearch('')
+              setSrcPortSearch('')
+              setProtocolSearch('')
+              setSelectedProtocols([])
+              wrappedOnChange(RESET_FILTERS)
+            }}
+            className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            Reset
+          </button>
+        )}
       </div>
       </div>{/* end collapsible wrapper */}
     </div>
