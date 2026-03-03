@@ -122,6 +122,51 @@ VPN_PREFIX_DESCRIPTIONS = {
     'l2tp':  'L2TP Server',
 }
 
+
+def build_vpn_cidr_map(vpn_networks):
+    """Pre-parse VPN CIDRs into (network_obj, gateway_ip, badge, type_name) tuples.
+
+    The first usable IP in each CIDR is the VPN gateway (e.g. .1 in a /24).
+    """
+    result = []
+    for iface, cfg in vpn_networks.items():
+        cidr, badge = cfg.get('cidr', ''), cfg.get('badge', '')
+        if cidr and badge:
+            try:
+                net = ipaddress.ip_network(cidr, strict=False)
+                gw_ip = net.network_address + 1
+                type_name = next(
+                    (d for p, d in VPN_PREFIX_DESCRIPTIONS.items() if iface.startswith(p)),
+                    badge
+                )
+                result.append((net, gw_ip, badge, type_name))
+            except ValueError:
+                pass
+    return result
+
+
+def match_vpn_ip(ip_str, vpn_cidrs, exclude_ips=None):
+    """Check if an IP falls within a VPN CIDR.
+
+    Returns (badge, device_name) if matched, else None.
+    Gateway IPs (.1) get device_name='Gateway'; other IPs get the VPN type name.
+    """
+    if not vpn_cidrs or not ip_str:
+        return None
+    if exclude_ips and ip_str in exclude_ips:
+        return None
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        for net, gw_ip, badge, type_name in vpn_cidrs:
+            if ip_obj in net:
+                if ip_obj == gw_ip:
+                    return (badge, 'Gateway')
+                return (badge, type_name)
+    except ValueError:
+        pass
+    return None
+
+
 MONTHS = {
     'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
     'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,

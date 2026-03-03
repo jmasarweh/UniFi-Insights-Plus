@@ -209,7 +209,9 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs font-mono text-gray-500">{wan.iface}</span>
                     {wan.wanIp && (
-                      <span className="text-xs font-mono text-gray-500">{wan.wanIp}</span>
+                      <span className="text-xs font-mono text-gray-500">
+                        {wan.wanIp}{wan.tunnelIp ? ` (tunnel: ${wan.tunnelIp})` : ''}
+                      </span>
                     )}
                   </div>
                 </div>

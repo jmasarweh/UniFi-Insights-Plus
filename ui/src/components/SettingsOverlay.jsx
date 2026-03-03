@@ -110,6 +110,7 @@ export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn
         iface: w.physical_interface,
         name: w.name,
         wanIp: w.wan_ip || null,
+        tunnelIp: w.tunnel_ip || null,
         active: w.active,
         type: w.type || null,
       }))

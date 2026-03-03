@@ -418,7 +418,9 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                               </span>
                             )}
                             {w.wan_ip && (
-                              <span className="text-xs font-mono text-gray-400">{w.wan_ip}</span>
+                              <span className="text-xs font-mono text-gray-400">
+                                {w.wan_ip}{w.tunnel_ip ? ` (tunnel: ${w.tunnel_ip})` : ''}
+                              </span>
                             )}
                             {!isActive && (
                               <span className="text-xs text-yellow-400/80">Inactive</span>
@@ -618,7 +620,10 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">{w.wan_ip || '\u2014'}</td>
+                                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
+                                    {w.wan_ip || '\u2014'}
+                                    {w.tunnel_ip && <span className="text-gray-600 ml-1">(tunnel: {w.tunnel_ip})</span>}
+                                  </td>
                                   <td className="px-4 py-2.5">
                                     <input
                                       type="text"

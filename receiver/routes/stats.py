@@ -13,6 +13,7 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config, get_wan_ips_from_config
 from deps import get_conn, put_conn, enricher_db
+from parsers import build_vpn_cidr_map, match_vpn_ip
 from query_helpers import parse_time_range, build_log_query, validate_time_params, VALID_TIME_RANGES
 
 logger = logging.getLogger('api.stats')
@@ -429,6 +430,31 @@ def get_ip_pairs(
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             pairs = [dict(r) for r in cur.fetchall()]
+
+        # Enrich with gateway + WAN device names (matches Sankey/Log Stream)
+        gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
+        wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
+
+        # VPN badges
+        vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
+        vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
+        exclude_ips = set(wan_ip_names.keys()) | set(gateway_vlans.keys())
+
+        for pair in pairs:
+            for prefix in ('src', 'dst'):
+                ip_str = pair.get(f'{prefix}_ip', '')
+                name_key = f'{prefix}_device_name'
+                if not pair.get(name_key):
+                    if ip_str in gateway_vlans:
+                        pair[name_key] = 'Gateway'
+                    elif ip_str in wan_ip_names:
+                        pair[name_key] = wan_ip_names[ip_str]
+                # VPN device name (e.g. "Teleport", "WireGuard Server")
+                if vpn_cidrs and not pair.get(name_key):
+                    vpn_result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
+                    if vpn_result:
+                        pair[name_key] = vpn_result[1]
+
         conn.commit()
         return {"pairs": pairs}
     except Exception as e:

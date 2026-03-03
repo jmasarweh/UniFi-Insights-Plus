@@ -2,7 +2,6 @@
 
 import csv
 import io
-import ipaddress
 import logging
 from datetime import datetime
 from typing import Optional
@@ -14,46 +13,19 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config, get_wan_ips_from_config
 from deps import get_conn, put_conn, enricher_db
-from parsers import VPN_PREFIX_DESCRIPTIONS
+from parsers import build_vpn_cidr_map, match_vpn_ip
 from query_helpers import build_log_query, validate_time_params
 from services import get_service_description
 
 
-def _build_vpn_cidr_map(vpn_networks):
-    """Pre-parse VPN CIDRs into (network_obj, gateway_ip, badge, type_name) tuples.
-
-    The first usable IP in each CIDR is the VPN gateway (e.g. .1 in a /24).
-    """
-    result = []
-    for iface, cfg in vpn_networks.items():
-        cidr, badge = cfg.get('cidr', ''), cfg.get('badge', '')
-        if cidr and badge:
-            try:
-                net = ipaddress.ip_network(cidr, strict=False)
-                gw_ip = net.network_address + 1
-                # Derive type name from interface prefix, not badge
-                type_name = next(
-                    (d for p, d in VPN_PREFIX_DESCRIPTIONS.items() if iface.startswith(p)),
-                    badge
-                )
-                result.append((net, gw_ip, badge, type_name))
-            except ValueError:
-                pass
-    return result
-
-
 def _annotate_vpn_badges(logs, vpn_cidrs, exclude_ips=None):
     """Annotate logs with VPN gateway badges and device type names.
-
-    Follows the same pattern as gateway/WAN annotation: only tags IPs that
-    are explicitly within a configured VPN CIDR.
 
     Gateway IP (first in CIDR) → device_name='Gateway' + badge.
     Other IPs in pool → device_name=VPN type name (e.g. 'WireGuard Server'), no badge.
     """
     if not vpn_cidrs:
         return
-    skip_ips = exclude_ips or set()
 
     for log in logs:
         for prefix in ('src', 'dst'):
@@ -62,25 +34,15 @@ def _annotate_vpn_badges(logs, vpn_cidrs, exclude_ips=None):
             if log.get(f'{prefix}_device_network'):
                 continue
 
-            name_key = f'{prefix}_device_name'
             ip_str = str(log.get(f'{prefix}_ip', '')).split('/')[0]
-            if not ip_str or ip_str in skip_ips:
-                continue
-
-            try:
-                ip_obj = ipaddress.ip_address(ip_str)
-                for net, gw_ip, badge, type_name in vpn_cidrs:
-                    if ip_obj in net:
-                        if ip_obj == gw_ip:
-                            if not log.get(name_key):
-                                log[name_key] = 'Gateway'
-                            log[f'{prefix}_device_network'] = badge
-                        else:
-                            if not log.get(name_key):
-                                log[name_key] = type_name
-                        break
-            except ValueError:
-                pass
+            result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
+            if result:
+                badge, device_name = result
+                name_key = f'{prefix}_device_name'
+                if not log.get(name_key):
+                    log[name_key] = device_name
+                if device_name == 'Gateway':
+                    log[f'{prefix}_device_network'] = badge
 
 logger = logging.getLogger('api.logs')
 
@@ -440,7 +402,7 @@ def _annotate_logs(logs):
     gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
     wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
     vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-    vpn_cidrs = _build_vpn_cidr_map(vpn_networks) if vpn_networks else []
+    vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
     exclude_ips = (set(wan_ip_names.keys()) | set(gateway_vlans.keys())) if vpn_cidrs else set()
 
     for log in logs:
@@ -607,7 +569,7 @@ def export_csv_endpoint(
         gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
         wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
         vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-        vpn_cidrs = _build_vpn_cidr_map(vpn_networks) if vpn_networks else []
+        vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
         csv_exclude_ips = set(wan_ip_names.keys()) | set(gateway_vlans.keys())
         src_ip_idx = export_columns.index('src_ip')
         dst_ip_idx = export_columns.index('dst_ip')
@@ -636,21 +598,14 @@ def export_csv_endpoint(
                     elif ip_str in wan_ip_names:
                         row[name_idx] = wan_ip_names[ip_str]
                 # VPN annotation — same CIDR-based pattern as gateway/WAN
-                if row[vlan_idx] is None and row[net_idx] is None and ip_str and ip_str not in csv_exclude_ips and vpn_cidrs:
-                    try:
-                        ip_obj = ipaddress.ip_address(ip_str)
-                        for net, gw_ip, badge, type_name in vpn_cidrs:
-                            if ip_obj in net:
-                                if ip_obj == gw_ip:
-                                    if not row[name_idx]:
-                                        row[name_idx] = 'Gateway'
-                                    row[net_idx] = badge
-                                else:
-                                    if not row[name_idx]:
-                                        row[name_idx] = type_name
-                                break
-                    except ValueError:
-                        pass
+                if row[vlan_idx] is None and row[net_idx] is None and vpn_cidrs:
+                    vpn_result = match_vpn_ip(ip_str, vpn_cidrs, csv_exclude_ips)
+                    if vpn_result:
+                        badge, device_name = vpn_result
+                        if not row[name_idx]:
+                            row[name_idx] = device_name
+                        if device_name == 'Gateway':
+                            row[net_idx] = badge
             writer.writerow([str(v) if v is not None else '' for v in row])
 
         output.seek(0)

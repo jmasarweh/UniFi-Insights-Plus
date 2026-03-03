@@ -177,13 +177,13 @@ export default function TopIPPairs({ filters, refreshKey, sankeyFilter, onClearS
                   onClick={() => drillToLogs(p)}
                   className="border-t border-gray-800/50 hover:bg-gray-800/30 cursor-pointer transition-colors"
                 >
-                  <td className="px-2 py-1.5 align-top min-w-0">
+                  <td className="px-2 py-1.5 align-middle min-w-0">
                     <div onClick={onIpClick ? (e) => { e.stopPropagation(); onIpClick(p.src_ip, i) } : undefined}
                          className={onIpClick ? 'cursor-pointer ip-clickable' : ''}>
                       <IPCell ip={p.src_ip} deviceName={p.src_device_name} subline={srcSubline} />
                     </div>
                   </td>
-                  <td className="px-2 py-1.5 align-top min-w-0">
+                  <td className="px-2 py-1.5 align-middle min-w-0">
                     <div className="flex items-start gap-1.5 min-w-0">
                       <span className="text-gray-600 pt-0.5 shrink-0">&rarr;</span>
                       <div onClick={onIpClick ? (e) => { e.stopPropagation(); onIpClick(p.dst_ip, i) } : undefined}

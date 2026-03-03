@@ -580,10 +580,37 @@ class UniFiAPI:
                                    "-> defaulting to %s", wan_type, networkgroup, physical)
 
             health_sub = wan_health.get(networkgroup, {})
-            net_wan_ip = health_sub.get('wan_ip') or device_wan_ips.get(networkgroup)
+
+            # Detect tunnel WANs (GRE/5G backhaul) — device IP is inner tunnel
+            # endpoint, not the public-facing IP. networkconf.wan_ip is authoritative.
+            is_tunnel = (
+                net.get('wan_5g_index') is not None
+                or (net.get('ifname') or '').startswith('gre')
+                or net.get('lan_tunnel_wan_device')
+            )
+
+            if is_tunnel:
+                # networkconf.wan_ip is the public-facing IP for tunnel WANs;
+                # health may be absent or unreliable; device.ip is inner endpoint.
+                net_wan_ip = (
+                    net.get('wan_ip')
+                    or health_sub.get('wan_ip')
+                    or device_wan_ips.get(networkgroup)
+                )
+                tunnel_ip = device_wan_ips.get(networkgroup)
+                if tunnel_ip and tunnel_ip == net_wan_ip:
+                    tunnel_ip = None
+                logger.debug("Tunnel WAN detected: name=%s, group=%s, public=%s, tunnel=%s",
+                             name, networkgroup, net_wan_ip, tunnel_ip)
+            else:
+                # Standard WANs: health is authoritative, device is fallback.
+                net_wan_ip = health_sub.get('wan_ip') or device_wan_ips.get(networkgroup)
+                tunnel_ip = None
+
             wan_interfaces.append({
                 'name': name,
                 'wan_ip': net_wan_ip,
+                'tunnel_ip': tunnel_ip,
                 'type': wan_type,
                 'networkgroup': networkgroup,
                 'physical_interface': physical,
@@ -880,7 +907,7 @@ class UniFiAPI:
                     # Find gateway device name from polled devices
                     gateway_name = None
                     for d in devices:
-                        if any(k.startswith('wan') and k[3:].isdigit() for k in d):
+                        if d.get('device_type') in ('ugw', 'udm', 'uxg'):
                             gateway_name = d.get('device_name') or d.get('model')
                             break
                     if gateway_name:

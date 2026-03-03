@@ -10,7 +10,7 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config
 from deps import get_conn, put_conn, enricher_db
-from parsers import VPN_PREFIX_DESCRIPTIONS
+from parsers import build_vpn_cidr_map, match_vpn_ip
 from query_helpers import build_log_query, validate_time_params, ALLOWED_DIMENSIONS
 
 logger = logging.getLogger('api.flows')
@@ -138,39 +138,14 @@ def _lookup_ip_info(conn, nodes):
     vpn_badges = {}
     vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
     exclude_ips = set(wan_ip_names.keys()) | set(gw_vlans_config.keys())
-    if vpn_networks:
-        vpn_cidrs = []
-        for iface, cfg in vpn_networks.items():
-            cidr, badge = cfg.get('cidr', ''), cfg.get('badge', '')
-            if cidr and badge:
-                try:
-                    net = ipaddress.ip_network(cidr, strict=False)
-                    gw_ip = net.network_address + 1
-                    type_name = next(
-                        (d for p, d in VPN_PREFIX_DESCRIPTIONS.items()
-                         if iface.startswith(p)), badge)
-                    vpn_cidrs.append((net, gw_ip, badge, type_name))
-                except ValueError:
-                    pass
-
-        for ip_str in ip_set:
-            if ip_str in exclude_ips:
-                continue
-            try:
-                ip_obj = ipaddress.ip_address(ip_str)
-                for net, gw_ip, badge, type_name in vpn_cidrs:
-                    if ip_obj in net:
-                        if ip_obj == gw_ip:
-                            vpn_badges[ip_str] = badge
-                            if not device_names.get(ip_str):
-                                device_names[ip_str] = 'Gateway'
-                        else:
-                            vpn_badges[ip_str] = badge
-                            if not device_names.get(ip_str):
-                                device_names[ip_str] = type_name
-                        break
-            except ValueError:
-                pass
+    vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
+    for ip_str in ip_set:
+        result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
+        if result:
+            badge, device_name = result
+            vpn_badges[ip_str] = badge
+            if not device_names.get(ip_str):
+                device_names[ip_str] = device_name
 
     return device_names, gateway_vlans, vpn_badges
 
