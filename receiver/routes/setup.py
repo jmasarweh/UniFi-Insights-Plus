@@ -157,18 +157,8 @@ def network_segments(wan_interfaces: Optional[str] = None):
             suggested = f'VLAN {num}' if num.isdigit() else iface
             display_ip = ips[0] if ips else ''
         elif iface.startswith('eth'):
-            # Handle VLAN-tagged interfaces like eth4.10 → "Ethernet 4 VLAN 10"
-            rest = iface[3:]
-            if '.' in rest:
-                base, vlan_tag = rest.split('.', 1)
-                if base.isdigit() and vlan_tag.isdigit():
-                    suggested = f'Ethernet {base} VLAN {vlan_tag}'
-                else:
-                    suggested = iface
-            elif rest.isdigit():
-                suggested = f'Ethernet {rest}'
-            else:
-                suggested = iface
+            num = iface[3:]
+            suggested = f'Ethernet {num}' if num.isdigit() else iface
             display_ip = ips[0] if ips else ''
         else:
             suggested = 'VPN' if is_vpn_iface else ''
@@ -311,12 +301,6 @@ def list_interfaces():
                 entry['vlan_id'] = int(num)
         elif iface.startswith('eth'):
             entry['iface_type'] = 'eth'
-            # Extract VLAN tag from dot notation (e.g., eth4.10 → vlan_id 10)
-            rest = iface[3:]
-            if '.' in rest:
-                _, vlan_tag = rest.split('.', 1)
-                if vlan_tag.isdigit():
-                    entry['vlan_id'] = int(vlan_tag)
         result.append(entry)
 
     return {'interfaces': result}
