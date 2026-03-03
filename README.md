@@ -22,7 +22,7 @@ Single Docker container. No external dependencies. Zero data collection.
 - 🖧 [Unraid Setup](#-unraid-setup)
 - 🧹 [Database Maintenance](#-database-maintenance)
 - 🔧 [Troubleshooting](#-troubleshooting)
-- [⚖️ [Disclaimer](#-disclaimer)
+- ⚖️ [Disclaimer](#-disclaimer)
 - 📄 [License](#-license-1)
 - 📸 [App Screenshots](#-app-screenshots)
 
