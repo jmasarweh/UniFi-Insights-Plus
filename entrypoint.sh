@@ -9,7 +9,7 @@ PGDATA="/var/lib/postgresql/data"
 # (that strips interior whitespace, diverging from Python's .strip())
 _db_host_lower=$(echo "${DB_HOST:-127.0.0.1}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
 _external_db=false
-if [ "$_db_host_lower" != "127.0.0.1" ] && [ "$_db_host_lower" != "localhost" ] && [ "$_db_host_lower" != "::1" ] && [ -n "$_db_host_lower" ]; then
+if [ "$_db_host_lower" != "127.0.0.1" ] && [ "$_db_host_lower" != "localhost" ] && [ "$_db_host_lower" != "localhost.localdomain" ] && [ "$_db_host_lower" != "::1" ] && [ -n "$_db_host_lower" ]; then
     _external_db=true
 fi
 

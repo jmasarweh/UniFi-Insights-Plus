@@ -10,9 +10,20 @@ services:
       - ./maxmind:/app/maxmind
       # Mount TLS certificates for verify-ca/verify-full/mTLS (uncomment if needed):
       # - ./certs:/certs:ro
+    # ── Credentials ──
+    # For production, use env_file or Docker secrets to supply POSTGRES_PASSWORD
+    # and DB_PASSWORD instead of inline values. Example:
+    #   env_file: .env          # loads POSTGRES_PASSWORD, DB_PASSWORD, etc. from .env
+    # Or with Docker secrets:
+    #   secrets:
+    #     - db_password
+    #     - encryption_secret
+    env_file: .env              # Recommended: supply POSTGRES_PASSWORD, DB_PASSWORD via .env
     environment:
-      # ── Required ──
-      POSTGRES_PASSWORD: "your_encryption_secret"   # Used for API key encryption only
+      # ── Required (set in .env or override here) ──
+      # POSTGRES_PASSWORD is required for API key encryption (not used for DB connection).
+      # DB_PASSWORD is the actual database connection password.
+      # Both should be defined in your .env file for production use.
 
       # ── External Database ──
       # Container on same Docker network:
@@ -29,7 +40,6 @@ services:
       DB_PORT: "5432"
       DB_NAME: "unifi_logs"
       DB_USER: "unifi"
-      DB_PASSWORD: "your_db_password"
       # DB_SSLMODE: "require"                        # require | verify-ca | verify-full
       # DB_SSLROOTCERT: "/certs/ca-certificate.crt"  # required for verify-ca / verify-full
       # DB_SSLCERT: "/certs/client-cert.crt"          # optional: client cert for mTLS

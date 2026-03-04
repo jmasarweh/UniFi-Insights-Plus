@@ -101,7 +101,7 @@ def build_conn_params() -> dict:
 def is_external_db() -> bool:
     """Check if the app is configured to use an external database."""
     host = _normalize_db_host(os.environ.get('DB_HOST', '127.0.0.1'))
-    return host not in ('127.0.0.1', 'localhost', '::1', '')
+    return host not in ('127.0.0.1', 'localhost', 'localhost.localdomain', '::1', '')
 
 
 def wait_for_postgres(conn_params: dict, max_retries: int = 30, delay: float = 2.0):

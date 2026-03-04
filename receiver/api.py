@@ -27,6 +27,7 @@ from routes.threats import router as threats_router
 from routes.flows import router as flows_router
 from routes.mcp import router as mcp_router
 from routes.views import router as views_router
+from routes.migration import router as migration_router
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ app.include_router(threats_router)
 app.include_router(flows_router)
 app.include_router(mcp_router)
 app.include_router(views_router)
+app.include_router(migration_router)
 
 
 # ── Static file serving ──────────────────────────────────────────────────────

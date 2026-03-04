@@ -415,6 +415,53 @@ export async function updateUiSettings(settings) {
   return resp.json()
 }
 
+// ── Database Migration ───────────────────────────────────────────────────────
+
+export async function testMigrationConnection(params) {
+  const resp = await fetch(`${BASE}/migration/test-connection`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `API error: ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function startMigration(params) {
+  const resp = await fetch(`${BASE}/migration/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `API error: ${resp.status}`)
+  }
+  return resp.json()
+}
+
+export async function getMigrationStatus() {
+  const resp = await fetch(`${BASE}/migration/status`)
+  if (!resp.ok) throw new Error(`API error: ${resp.status}`)
+  return resp.json()
+}
+
+export async function patchMigrationCompose(params) {
+  const resp = await fetch(`${BASE}/migration/patch-compose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `API error: ${resp.status}`)
+  }
+  return resp.json()
+}
+
 // ── Version Check ────────────────────────────────────────────────────────────
 
 export async function fetchLatestRelease(currentVersion) {

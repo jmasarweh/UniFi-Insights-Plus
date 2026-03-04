@@ -1,12 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   fetchRetentionConfig, updateRetentionConfig, runRetentionCleanup,
-  exportConfig, importConfig
+  exportConfig, importConfig,
+  testMigrationConnection, startMigration, getMigrationStatus,
+  patchMigrationCompose
 } from '../api'
+import CopyButton from './CopyButton'
 
 const RETENTION_PRESETS = [30, 60, 90, 120, 180, 365]
 const DISK_CRITICAL_BYTES = 512 * 1024 * 1024       // 512 MB
 const DISK_WARNING_BYTES  = 2 * 1024 * 1024 * 1024  // 2 GB
+const EXTERNAL_DB_WIKI_URL = 'https://github.com/jmasarweh/unifi-log-insight/wiki/External-PostgreSQL-Migration-Guide'
 
 function formatBytes(bytes) {
   if (bytes == null) return '—'
@@ -14,6 +18,408 @@ function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+}
+
+// ── Step pill for migration wizard ──────────────────────────────────────────
+
+const WIZARD_STEPS = ['Configure', 'Test', 'Migrate', 'Done']
+
+function StepPill({ index, label, current }) {
+  const done = index < current
+  const active = index === current
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`w-5 h-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 ${
+        done ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+        : active ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+        : 'bg-gray-800 text-gray-600 border border-gray-700'
+      }`}>{done ? '\u2713' : index + 1}</span>
+      <span className={`text-xs ${active ? 'text-gray-200' : done ? 'text-gray-400' : 'text-gray-600'}`}>{label}</span>
+    </div>
+  )
+}
+
+// ── Migration Wizard Component ─────────────────────────────────────────────
+
+function MigrationWizard() {
+  const [step, setStep] = useState(0) // 0=Configure, 1=Test, 2=Migrate, 3=Done
+  const [form, setForm] = useState({
+    host: '', port: 5432, dbname: 'unifi_logs',
+    user: '', password: '', sslmode: 'disable'
+  })
+  const [testResult, setTestResult] = useState(null)
+  const [testing, setTesting] = useState(false)
+  const [composeInput, setComposeInput] = useState('')
+  const [composeOutput, setComposeOutput] = useState('')
+  const [patchError, setPatchError] = useState(null)
+  const [patching, setPatching] = useState(false)
+  const [migStatus, setMigStatus] = useState(null)
+  const [migError, setMigError] = useState(null)
+  const [isExternal, setIsExternal] = useState(false)
+  const pollRef = useRef(null)
+
+  // On mount: check current state
+  useEffect(() => {
+    getMigrationStatus().then(s => {
+      setIsExternal(s.is_external)
+      if (s.status === 'running') { setStep(2); startPolling() }
+      else if (s.status === 'complete') { setStep(3); setMigStatus(s) }
+    }).catch(() => {})
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await getMigrationStatus()
+        setMigStatus(s)
+        if (s.status === 'complete') { setStep(3); clearInterval(pollRef.current) }
+        else if (s.status === 'failed') { setMigError(s.message); clearInterval(pollRef.current) }
+      } catch { /* ignore */ }
+    }, 3000)
+  }
+
+  async function handleTest() {
+    setTesting(true); setTestResult(null)
+    try {
+      const r = await testMigrationConnection(form)
+      setTestResult(r)
+      if (r.success) setStep(1)
+    } catch (e) {
+      setTestResult({ success: false, message: e.message })
+    } finally { setTesting(false) }
+  }
+
+  async function handleStartMigration() {
+    setMigError(null)
+    try {
+      await startMigration(form)
+      setStep(2)
+      startPolling()
+    } catch (e) {
+      setMigError(e.message)
+    }
+  }
+
+  function handleReset() {
+    setStep(0); setTestResult(null); setMigStatus(null); setMigError(null)
+    setComposeInput(''); setComposeOutput(''); setPatchError(null)
+  }
+
+  async function handlePatchCompose() {
+    setPatching(true); setPatchError(null); setComposeOutput('')
+    try {
+      const r = await patchMigrationCompose({
+        compose_yaml: composeInput,
+        host: form.host, port: form.port, dbname: form.dbname,
+        user: form.user, sslmode: form.sslmode,
+      })
+      if (r.success) {
+        setComposeOutput(r.compose_yaml)
+      } else {
+        setPatchError(r.message || 'Failed to patch compose file')
+      }
+    } catch (e) {
+      setPatchError(e.message)
+    } finally { setPatching(false) }
+  }
+
+  function setField(k, v) { setForm(prev => ({ ...prev, [k]: v })) }
+
+  // Already external — no wizard needed
+  if (isExternal) {
+    return (
+      <section>
+        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
+        <div className="rounded-lg border border-gray-700 bg-gray-950 p-5">
+          <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded px-3 py-2.5">
+            <svg className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+            </svg>
+            <p className="text-sm text-emerald-400">Already using an external database. Migration is not available.</p>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
+      <div className="rounded-lg border border-gray-700 bg-gray-950">
+        <div className="p-5 space-y-5">
+          {/* Step indicator */}
+          <div className="flex items-center gap-4">
+            {WIZARD_STEPS.map((label, i) => (
+              <StepPill key={label} index={i} label={label} current={step} />
+            ))}
+          </div>
+
+          {/* ── Steps 0-1: Configure + Test ── */}
+          {step <= 1 && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-400">
+                Migrate your data to an external PostgreSQL 14+ instance. The target database must already exist — tables are created automatically.
+              </p>
+              <a
+                href={EXTERNAL_DB_WIKI_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                Stuck? Open the full external PostgreSQL guide
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+
+              {/* Form */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-400 mb-1">Host</label>
+                  <input value={form.host} onChange={e => setField('host', e.target.value)}
+                    placeholder="e.g. postgres or 192.168.1.50"
+                    className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
+                  <p className="text-[11px] text-blue-400 mt-1">
+                    If PostgreSQL is in another Docker container on this host, use a host-routable address and mapped port
+                    (for example <code className="bg-gray-800 px-1 py-0.5 rounded">host.docker.internal:5432</code> on Docker Desktop
+                    or the host gateway IP on Linux). Do not use container bridge IPs like <code className="bg-gray-800 px-1 py-0.5 rounded">172.18.x.x</code>.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Port</label>
+                  <input type="number" value={form.port} onChange={e => setField('port', parseInt(e.target.value) || 5432)}
+                    className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Database Name</label>
+                <input value={form.dbname} readOnly
+                  className="w-full px-3 py-1.5 rounded bg-gray-900/50 border border-gray-700 text-sm text-gray-500 cursor-not-allowed" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Username</label>
+                  <input value={form.user} onChange={e => setField('user', e.target.value)}
+                    className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Password</label>
+                  <input type="password" value={form.password} onChange={e => setField('password', e.target.value)}
+                    className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">SSL Mode</label>
+                <select value={form.sslmode} onChange={e => setField('sslmode', e.target.value)}
+                  className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none">
+                  <option value="disable">disable</option>
+                  <option value="require">require</option>
+                  <option value="verify-ca">verify-ca</option>
+                  <option value="verify-full">verify-full</option>
+                </select>
+              </div>
+
+              {/* Test result */}
+              {testResult && (
+                <div className={`flex items-start gap-2 rounded px-3 py-2.5 ${
+                  testResult.success
+                    ? 'bg-emerald-500/10 border border-emerald-500/30'
+                    : 'bg-red-500/10 border border-red-500/30'
+                }`}>
+                  <svg className={`w-4 h-4 shrink-0 mt-0.5 ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                    {testResult.success ? (
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                    ) : (
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                    )}
+                  </svg>
+                  <div className="text-xs space-y-0.5">
+                    <p className={testResult.success ? 'text-emerald-400' : 'text-red-400'}>{testResult.message}</p>
+                    {testResult.connectivity_hint && (
+                      <p className="text-yellow-400 mt-1">
+                        {testResult.connectivity_hint}
+                        {' '}
+                        <a
+                          href={EXTERNAL_DB_WIKI_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline text-yellow-300 hover:text-yellow-200"
+                        >
+                          Full guide
+                        </a>
+                      </p>
+                    )}
+                    {testResult.server_version && <p className="text-gray-500">{testResult.server_version}</p>}
+                    {testResult.has_foreign_tables && (
+                      <p className="text-yellow-400 mt-1">Warning: target has unknown tables ({testResult.foreign_tables.join(', ')}). Migration will be blocked.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Buttons */}
+              <div className="flex items-center gap-3">
+                <button onClick={handleTest} disabled={testing || !form.host.trim()}
+                  className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50">
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </button>
+                {testResult?.success && !testResult.has_foreign_tables && (
+                  <button onClick={handleStartMigration}
+                    className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors">
+                    Start Migration
+                  </button>
+                )}
+              </div>
+
+              {migError && (
+                <div className="text-xs text-red-400">{migError}</div>
+              )}
+            </div>
+          )}
+
+          {/* ── Step 2: Migrating ── */}
+          {step === 2 && (
+            <div className="space-y-4">
+              {/* Progress bar */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-300">{migStatus?.step || 'Starting...'}</span>
+                  <span className="text-xs text-gray-500 font-mono">{migStatus?.progress_pct || 0}%</span>
+                </div>
+                <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-teal-500 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${migStatus?.progress_pct || 0}%` }} />
+                </div>
+                {migStatus?.message && <p className="text-xs text-gray-500 mt-1">{migStatus.message}</p>}
+              </div>
+
+              {/* Warning */}
+              <div className="flex items-start gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2">
+                <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                <p className="text-xs text-yellow-400/90">Do not restart the container while migration is running.</p>
+              </div>
+
+              {/* Error state */}
+              {migError && (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded px-3 py-2.5">
+                    <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                    </svg>
+                    <div className="text-xs text-red-400">{migError}</div>
+                  </div>
+                  <button onClick={handleReset}
+                    className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
+                    Back to Configuration
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Step 3: Done ── */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded px-3 py-2.5">
+                <svg className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm text-emerald-400">Migration complete! Your embedded data is untouched and safe.</p>
+              </div>
+
+              {/* Row count validation table */}
+              {migStatus?.details?.validation && (
+                <div className="rounded border border-gray-700 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-900">
+                        <th className="text-left px-3 py-1.5 text-gray-400 font-medium">Table</th>
+                        <th className="text-right px-3 py-1.5 text-gray-400 font-medium">Source</th>
+                        <th className="text-right px-3 py-1.5 text-gray-400 font-medium">Target</th>
+                        <th className="text-center px-3 py-1.5 text-gray-400 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(migStatus.details.validation).map(([table, v]) => (
+                        <tr key={table} className="border-t border-gray-800">
+                          <td className="px-3 py-1.5 font-mono text-gray-300">{table}</td>
+                          <td className="text-right px-3 py-1.5 text-gray-400 font-mono">{v.source < 0 ? '—' : v.source.toLocaleString()}</td>
+                          <td className="text-right px-3 py-1.5 text-gray-400 font-mono">{v.target < 0 ? '—' : v.target.toLocaleString()}</td>
+                          <td className="text-center px-3 py-1.5">
+                            <span className={v.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}>
+                              {v.status === 'ok' ? '\u2713' : '\u2717'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Compose patcher — Phase 1: Paste */}
+              {!composeOutput && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-400">
+                    Paste your current <code className="bg-gray-800 px-1 py-0.5 rounded">docker-compose.yml</code> below to generate an updated version with the external database configuration.
+                  </p>
+                  <textarea
+                    value={composeInput}
+                    onChange={e => setComposeInput(e.target.value)}
+                    placeholder="Paste your docker-compose.yml here..."
+                    rows={10}
+                    className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 font-mono focus:border-blue-500 focus:outline-none resize-y"
+                  />
+                  <div className="flex items-center gap-3">
+                    <button onClick={handlePatchCompose} disabled={patching || !composeInput.trim()}
+                      className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors disabled:opacity-50">
+                      {patching ? 'Generating...' : 'Generate Updated Compose'}
+                    </button>
+                  </div>
+                  {patchError && (
+                    <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded px-3 py-2.5">
+                      <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                      </svg>
+                      <p className="text-xs text-red-400">{patchError}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Compose patcher — Phase 2: Result */}
+              {composeOutput && (
+                <div className="space-y-3">
+                  <div className="relative rounded bg-gray-900 border border-gray-700 p-3">
+                    <pre className="text-xs text-gray-300 font-mono whitespace-pre overflow-x-auto max-h-96 overflow-y-auto">{composeOutput}</pre>
+                    <div className="absolute top-2 right-2">
+                      <CopyButton text={composeOutput} />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-gray-400">
+                      Save this as your <code className="bg-gray-800 px-1 py-0.5 rounded">docker-compose.yml</code>, set <code className="bg-gray-800 px-1 py-0.5 rounded">DB_PASSWORD=&lt;password&gt;</code> in your <code className="bg-gray-800 px-1 py-0.5 rounded">.env</code> file, then run <code className="bg-gray-800 px-1 py-0.5 rounded">docker compose up -d</code>.
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      YAML comments from your original file are not preserved.
+                    </p>
+                  </div>
+                  <button onClick={() => { setComposeOutput(''); setComposeInput('') }}
+                    className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
+                    Paste Different Compose File
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 export default function SettingsDataBackups({ totalLogs, storage }) {
@@ -305,68 +711,8 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
         </div>
       </section>
 
-      {/* ── External Database ────────────────────────────────────── */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">
-          External Database
-        </h2>
-        <div className="rounded-lg border border-gray-700 bg-gray-950">
-          <div className="p-5 space-y-4">
-            <p className="text-sm text-gray-300">
-              You can point UniFi Log Insight at an existing PostgreSQL 14+ instance instead of using the embedded database.
-              The schema is auto-provisioned on first boot — no need to run <code className="text-xs bg-gray-800 px-1 py-0.5 rounded">init.sql</code> manually.
-            </p>
-
-            {/* Migration steps */}
-            <div className="flex items-start gap-2 bg-blue-500/10 border border-blue-500/30 rounded px-3 py-2.5">
-              <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-              </svg>
-              <div className="text-xs text-blue-400/90 space-y-1.5">
-                <p className="font-medium text-blue-400">Migration Steps</p>
-                <ol className="list-decimal list-inside space-y-1 ml-1">
-                  <li>Export your configuration using Backup &amp; Restore below</li>
-                  <li>Dump data: <code className="bg-blue-500/10 px-1 py-0.5 rounded">docker exec unifi-log-insight pg_dump -U unifi unifi_logs &gt; backup.sql</code></li>
-                  <li>Create the target database and user on the external instance</li>
-                  <li>Restore: <code className="bg-blue-500/10 px-1 py-0.5 rounded">psql -h &lt;host&gt; -U &lt;user&gt; -d &lt;dbname&gt; -f backup.sql</code></li>
-                  <li>Update <code className="bg-blue-500/10 px-1 py-0.5 rounded">docker-compose.yml</code> with <code className="bg-blue-500/10 px-1 py-0.5 rounded">DB_HOST</code>, <code className="bg-blue-500/10 px-1 py-0.5 rounded">DB_PORT</code>, <code className="bg-blue-500/10 px-1 py-0.5 rounded">DB_NAME</code>, <code className="bg-blue-500/10 px-1 py-0.5 rounded">DB_USER</code>, <code className="bg-blue-500/10 px-1 py-0.5 rounded">DB_PASSWORD</code></li>
-                  <li>Remove the <code className="bg-blue-500/10 px-1 py-0.5 rounded">pgdata</code> volume mount (old data will sit unused if left)</li>
-                  <li>Restart: <code className="bg-blue-500/10 px-1 py-0.5 rounded">docker compose up -d</code></li>
-                  <li>Import config backup via Backup &amp; Restore</li>
-                </ol>
-              </div>
-            </div>
-
-            {/* Important notes */}
-            <div className="flex items-start gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2.5">
-              <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-              </svg>
-              <div className="text-xs text-yellow-400/90 space-y-1">
-                <p className="font-medium text-yellow-400">Important</p>
-                <ul className="list-disc list-inside space-y-0.5 ml-1">
-                  <li><code className="bg-yellow-500/10 px-1 py-0.5 rounded">POSTGRES_PASSWORD</code> is still required (used for API key encryption, not DB connection)</li>
-                  <li>If <code className="bg-yellow-500/10 px-1 py-0.5 rounded">POSTGRES_PASSWORD</code> changes, stored API keys must be re-entered</li>
-                  <li>PostgreSQL 14 or newer is required</li>
-                  <li>The DB user needs CREATE TABLE, CREATE INDEX, CREATE FUNCTION privileges</li>
-                </ul>
-              </div>
-            </div>
-
-            <a
-              href="https://github.com/jmasarweh/unifi-log-insight/wiki/External-Database"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Full Guide
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          </div>
-        </div>
-      </section>
+      {/* ── Database Migration ──────────────────────────────────── */}
+      <MigrationWizard />
 
       {/* ── Export / Import Configuration ──────────────────────── */}
       <section>

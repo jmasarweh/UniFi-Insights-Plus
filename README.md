@@ -676,6 +676,9 @@ If disk usage is still high, check:
 
 UniFi Log Insight can connect to an existing PostgreSQL 14+ instance instead of running the embedded one. Set `DB_HOST` to a non-localhost address and the embedded PostgreSQL is automatically disabled.
 
+Need step-by-step migration and connection troubleshooting? See the full wiki guide:
+`https://github.com/jmasarweh/unifi-log-insight/wiki/External-PostgreSQL-Migration-Guide`
+
 **Requirements:**
 - PostgreSQL 14 or newer
 - A database user with DDL privileges (CREATE TABLE, CREATE INDEX, CREATE FUNCTION)
