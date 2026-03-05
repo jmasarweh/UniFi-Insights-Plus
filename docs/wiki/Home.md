@@ -8,8 +8,10 @@ Welcome to the UniFi Log Insight wiki. These guides cover advanced topics beyond
 
 ## Quick Links
 
-- [Quick Start](https://github.com/jmasarweh/unifi-log-insight#-quick-start)
-- [Configuration Reference](https://github.com/jmasarweh/unifi-log-insight#%EF%B8%8F-configuration-reference)
-- [Troubleshooting](https://github.com/jmasarweh/unifi-log-insight#-troubleshooting)
-- [Releases](https://github.com/jmasarweh/unifi-log-insight/releases)
-- [Report an Issue](https://github.com/jmasarweh/unifi-log-insight/issues)
+| | |
+|---|---|
+| [Quick Start](https://github.com/jmasarweh/unifi-log-insight#-quick-start) | Get up and running in minutes |
+| [Configuration Reference](https://github.com/jmasarweh/unifi-log-insight#%EF%B8%8F-configuration-reference) | Environment variables and options |
+| [Troubleshooting](https://github.com/jmasarweh/unifi-log-insight#-troubleshooting) | Common issues and fixes |
+| [Releases](https://github.com/jmasarweh/unifi-log-insight/releases) | Changelog and downloads |
+| [Report an Issue](https://github.com/jmasarweh/unifi-log-insight/issues) | Bug reports and feature requests |
