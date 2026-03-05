@@ -19,7 +19,7 @@ Single Docker container. No external dependencies. Zero data collection.
 - 🤖 [AI Agent Integration (MCP)](#-ai-agent-integration-mcp)
 - 📡 [API Endpoints](#-api-endpoints)
 - 🔤 [DNS Logging](#-dns-logging)
-- 🖧 [Unraid Setup](#-unraid-setup)
+- 🖧  [Unraid Setup](#-unraid-setup)
 - 🧹 [Database Maintenance](#-database-maintenance)
 - 🗄️ [External Database Setup](#️-external-database-setup)
 - 🔧 [Troubleshooting](#-troubleshooting)
