@@ -67,12 +67,12 @@ export default function SettingsUserInterface() {
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">User Interface</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">User Interface</h2>
         <div className="rounded-lg border border-gray-700 bg-gray-950">
           {/* Country Display */}
           <div className="p-5">
-            <p className="text-sm text-gray-200 font-medium">Country Display</p>
-            <p className="text-xs text-gray-500 mb-3">Control how countries appear in Source/Destination columns.</p>
+            <p className="text-base text-gray-200 font-medium">Country Display</p>
+            <p className="text-sm text-gray-500 mb-3">Control how countries appear in Source/Destination columns.</p>
             <div className="space-y-2">
               {COUNTRY_OPTIONS.map(opt => (
                 <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
@@ -84,7 +84,7 @@ export default function SettingsUserInterface() {
                     onChange={() => update('ui_country_display', opt.value)}
                     className="ui-radio"
                   />
-                  <span className="text-xs text-gray-300">{opt.label}</span>
+                  <span className="text-sm text-gray-300">{opt.label}</span>
                 </label>
               ))}
             </div>
@@ -94,8 +94,8 @@ export default function SettingsUserInterface() {
 
           {/* IP Subline */}
           <div className="p-5">
-            <p className="text-sm text-gray-200 font-medium">IP Address Subline</p>
-            <p className="text-xs text-gray-500 mb-3">Show ASN or AbuseIPDB hostname under IP addresses. When enabled, the standalone ASN column is hidden.</p>
+            <p className="text-base text-gray-200 font-medium">IP Address Subline</p>
+            <p className="text-sm text-gray-500 mb-3">Show ASN or AbuseIPDB hostname under IP addresses. When enabled, the standalone ASN column is hidden.</p>
             <div className="space-y-2">
               {SUBLINE_OPTIONS.map(opt => (
                 <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
@@ -107,7 +107,7 @@ export default function SettingsUserInterface() {
                     onChange={() => update('ui_ip_subline', opt.value)}
                     className="ui-radio"
                   />
-                  <span className="text-xs text-gray-300">{opt.label}</span>
+                  <span className="text-sm text-gray-300">{opt.label}</span>
                 </label>
               ))}
             </div>
@@ -117,8 +117,8 @@ export default function SettingsUserInterface() {
 
           {/* Blocked Row Highlight */}
           <div className="p-5">
-            <p className="text-sm text-gray-200 font-medium">Blocked Row Highlight</p>
-            <p className="text-xs text-gray-500 mb-3">Highlight blocked firewall log rows with a red background.</p>
+            <p className="text-base text-gray-200 font-medium">Blocked Row Highlight</p>
+            <p className="text-sm text-gray-500 mb-3">Highlight blocked firewall log rows with a red background.</p>
             <label className="flex items-center gap-2 cursor-pointer mb-3">
               <input
                 type="checkbox"
@@ -126,19 +126,19 @@ export default function SettingsUserInterface() {
                 onChange={e => update('ui_block_highlight', e.target.checked ? 'on' : 'off')}
                 className="ui-checkbox"
               />
-              <span className="text-xs text-gray-300">Enable red highlight on blocked rows</span>
+              <span className="text-sm text-gray-300">Enable red highlight on blocked rows</span>
             </label>
             {settings.ui_block_highlight === 'on' && (
               <div className="ml-6">
-                <p className="text-xs text-gray-400 mb-1">Minimum threat score</p>
-                <p className="text-xs text-gray-500 mb-2">Only highlight blocked rows when threat score meets this threshold. Set to 0 to highlight all blocked rows.</p>
+                <p className="text-sm font-medium text-gray-200 mb-1">Minimum threat score</p>
+                <p className="text-sm text-gray-500 mb-2">Only highlight blocked rows when threat score meets this threshold. Set to 0 to highlight all blocked rows.</p>
                 <input
                   type="number"
                   min={0}
                   max={100}
                   value={settings.ui_block_highlight_threshold ?? 0}
                   onChange={e => update('ui_block_highlight_threshold', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-20 px-2 py-1 rounded bg-gray-900 border border-gray-700 text-xs text-gray-200 focus:border-teal-500 focus:outline-none"
+                  className="w-20 px-2 py-1 rounded bg-gray-900 border border-gray-700 text-sm text-gray-200 focus:border-teal-500 focus:outline-none"
                 />
               </div>
             )}
@@ -148,8 +148,8 @@ export default function SettingsUserInterface() {
 
           {/* Theme */}
           <div className="p-5">
-            <p className="text-sm text-gray-200 font-medium">Theme</p>
-            <p className="text-xs text-gray-500 mb-3">Switch between dark and light mode.</p>
+            <p className="text-base text-gray-200 font-medium">Theme</p>
+            <p className="text-sm text-gray-500 mb-3">Switch between dark and light mode.</p>
             <div className="space-y-2">
               {THEME_OPTIONS.map(opt => (
                 <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
@@ -161,7 +161,7 @@ export default function SettingsUserInterface() {
                     onChange={() => update('ui_theme', opt.value)}
                     className="ui-radio"
                   />
-                  <span className="text-xs text-gray-300">{opt.label}</span>
+                  <span className="text-sm text-gray-300">{opt.label}</span>
                 </label>
               ))}
             </div>
@@ -171,13 +171,13 @@ export default function SettingsUserInterface() {
 
           <div className="px-5 py-3 flex items-center justify-between">
             <div>
-              {status === 'saved' && <span className="text-xs text-emerald-400">Settings saved</span>}
-              {status === 'error' && <span className="text-xs text-red-400">Failed to save</span>}
+              {status === 'saved' && <span className="text-sm text-emerald-400">Settings saved</span>}
+              {status === 'error' && <span className="text-sm text-red-400">Failed to save</span>}
             </div>
             <button
               onClick={handleSave}
               disabled={!dirty || saving}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                 dirty
                   ? 'bg-teal-600 hover:bg-teal-500 text-white'
                   : 'bg-gray-800 text-gray-500 cursor-not-allowed'

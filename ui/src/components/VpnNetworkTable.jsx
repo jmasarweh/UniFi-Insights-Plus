@@ -34,16 +34,16 @@ export default function VpnNetworkTable({
   borderColor = 'border-gray-700',
 }) {
   return (
-    <div className={`overflow-hidden rounded-lg border ${borderColor}`}>
+    <div className={`overflow-x-auto rounded-lg border ${borderColor}`}>
       <table className="w-full text-sm">
         <thead>
-          <tr className={`text-xs text-gray-400 border-b ${borderColor}`}>
-            <th className="px-4 py-2 text-left font-medium">Interface</th>
-            {showSampleIp && <th className="px-4 py-2 text-left font-medium">Sample IP</th>}
-            <th className="px-4 py-2 text-left font-medium">Badge</th>
-            <th className="px-4 py-2 text-left font-medium">VPN Type</th>
-            <th className="px-4 py-2 text-left font-medium">Network Label</th>
-            <th className="px-4 py-2 text-left font-medium">
+          <tr className={`text-sm text-gray-400 border-b ${borderColor}`}>
+            <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Interface</th>
+            {showSampleIp && <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Sample IP</th>}
+            <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Badge</th>
+            <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">VPN Type</th>
+            <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Network Label</th>
+            <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">
               <div>Network Pool / CIDR</div>
               <div className="font-normal text-xs text-gray-500 normal-case tracking-normal">First IP = VPN Gateway</div>
             </th>
@@ -64,12 +64,12 @@ export default function VpnNetworkTable({
                         VPN
                       </span>
                     </div>
-                    <span className="text-[11px] font-mono text-gray-500">{entry.iface}</span>
+                    <span className="text-xs font-mono text-gray-500">{entry.iface}</span>
                   </div>
                 </td>
                 {showSampleIp && (
                   <td className="px-4 py-2.5">
-                    <span className="text-xs font-mono text-gray-400">{entry.sampleIp || '\u2014'}</span>
+                    <span className="text-sm font-mono text-gray-400">{entry.sampleIp || '\u2014'}</span>
                   </td>
                 )}
                 <td className="px-4 py-2.5">
@@ -97,7 +97,7 @@ export default function VpnNetworkTable({
                       ))}
                     </select>
                     {warning && (
-                      <p className="text-[11px] text-yellow-400 mt-1">{warning}</p>
+                      <p className="text-sm text-yellow-400 mt-1">{warning}</p>
                     )}
                   </div>
                 </td>
@@ -165,7 +165,7 @@ function AddRow({ availableTypes, existingInterfaces, onAdd, showSampleIp }) {
     <tfoot>
       <tr className="border-t border-dashed border-gray-700 bg-gray-950/50">
         <td className="px-4 py-2.5">
-          <span className="text-xs text-gray-500 italic">New entry</span>
+          <span className="text-sm text-gray-500 italic">New entry</span>
         </td>
         {showSampleIp && <td className="px-4 py-2.5"></td>}
         <td className="px-4 py-2.5">
@@ -210,7 +210,7 @@ function AddRow({ availableTypes, existingInterfaces, onAdd, showSampleIp }) {
           <button
             onClick={handleAdd}
             disabled={!canAdd}
-            className="px-2 py-1 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            className="px-2 py-1 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
           >
             + Add
           </button>

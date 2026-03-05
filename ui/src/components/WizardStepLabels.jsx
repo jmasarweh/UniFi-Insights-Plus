@@ -209,14 +209,14 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
       {/* ── WAN Interfaces ──────────────────────────────────── */}
       {!loading && !error && wanSegments.length > 0 && (
         <section>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">WAN Interfaces</h3>
-          <div className="border border-gray-800 rounded-lg overflow-hidden">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">WAN Interfaces</h3>
+          <div className="border border-gray-800 rounded-lg overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800">
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Interface</th>
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Sample IP</th>
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Network Label</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Interface</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Sample IP</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Network Label</th>
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +231,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-mono text-gray-400">{seg.sample_local_ip || '\u2014'}</span>
+                      <span className="text-sm font-mono text-gray-400">{seg.sample_local_ip || '\u2014'}</span>
                     </td>
                     <td className="px-4 py-3">
                       <input
@@ -245,7 +245,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
                         }`}
                       />
                       {duplicateLabels.has(seg.interface) && (
-                        <p className="text-[11px] text-yellow-400 mt-1">Duplicate label</p>
+                        <p className="text-sm text-yellow-400 mt-1">Duplicate label</p>
                       )}
                     </td>
                   </tr>
@@ -259,14 +259,14 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
       {/* ── VLAN / Network Labels ──────────────────────────── */}
       {!loading && !error && vlanSegments.length > 0 && (
         <section>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">Network Labels</h3>
-          <div className="border border-gray-800 rounded-lg overflow-hidden">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">Network Labels</h3>
+          <div className="border border-gray-800 rounded-lg overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800">
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Interface</th>
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Sample IP</th>
-                  <th className="text-left text-xs font-medium text-gray-300 px-4 py-3">Network Label</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Interface</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Sample IP</th>
+                  <th className="text-left text-sm font-semibold text-gray-300 px-4 py-3 whitespace-nowrap">Network Label</th>
                 </tr>
               </thead>
               <tbody>
@@ -283,7 +283,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
                         {seg.manual && (
                           <button
                             onClick={() => handleRemoveManualInterface(seg.interface)}
-                            className="text-gray-500 hover:text-red-400 text-xs transition-colors"
+                            className="text-gray-500 hover:text-red-400 text-sm transition-colors"
                             title="Remove"
                             aria-label={`Remove ${seg.interface}`}
                           >
@@ -293,7 +293,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-mono text-gray-400">{seg.sample_local_ip || '\u2014'}</span>
+                      <span className="text-sm font-mono text-gray-400">{seg.sample_local_ip || '\u2014'}</span>
                     </td>
                     <td className="px-4 py-3">
                       <div>
@@ -308,7 +308,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
                           }`}
                         />
                         {duplicateLabels.has(seg.interface) && (
-                          <p className="text-[11px] text-yellow-400 mt-1">Duplicate label</p>
+                          <p className="text-sm text-yellow-400 mt-1">Duplicate label</p>
                         )}
                       </div>
                     </td>
@@ -323,8 +323,8 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
       {/* Add VLAN interface */}
       {!loading && !error && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">Add VLAN interface</h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <h3 className="text-base font-semibold text-gray-300 mb-2">Add VLAN interface</h3>
+          <p className="text-sm text-gray-400 mb-3">
             If a VLAN isn't listed above (no logs yet), enter its ID and label.
             VLAN 1 maps to br0, all others map to br&lt;ID&gt;.
           </p>
@@ -340,7 +340,7 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
               className="w-28 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm font-mono text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
             />
             {vlanId && vlanIdToInterface(parseInt(vlanId)) && (
-              <span className="text-xs font-mono text-gray-400 shrink-0">
+              <span className="text-sm font-mono text-gray-400 shrink-0">
                 {vlanIdToInterface(parseInt(vlanId))}
               </span>
             )}
@@ -371,9 +371,8 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
       {/* ── VPN Networks ────────────────────────────────────── */}
       {!loading && !error && vpnSegments.length > 0 && (
         <section>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">
             VPN Networks
-            <span className="ml-2 text-xs font-medium normal-case tracking-normal px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">Experimental</span>
           </h3>
           <VpnNetworkTable
             entries={vpnSegments.map(seg => {
@@ -401,14 +400,14 @@ export default function WizardStepLabels({ wanInterfaces, labels, onUpdate, vpnC
         <div className="flex justify-between">
           <button
             onClick={onBack}
-            className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+            className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
           >
             Back
           </button>
           <button
             onClick={onNext}
             disabled={hasValidationErrors || disabled}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
               hasValidationErrors || disabled
                 ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
                 : 'bg-teal-600 hover:bg-teal-500 text-white'

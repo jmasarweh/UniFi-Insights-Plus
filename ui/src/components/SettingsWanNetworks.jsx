@@ -127,13 +127,13 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
       {/* ── UniFi Gateway ─────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+          <h2 className="text-base font-semibold text-gray-300 uppercase tracking-wider">
             UniFi Gateway
           </h2>
           {unifiEnabled && (
             <button
               onClick={onRestartWizard}
-              className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               Reconfigure
             </button>
@@ -158,7 +158,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                   <span className="text-sm font-medium text-gray-200">
                     {unifiSettings?.host || 'UniFi Gateway'}
                   </span>
-                  <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 leading-none">
+                  <span className="flex items-center gap-1.5 text-sm text-emerald-400 leading-none">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 block" />
                     Online
                   </span>
@@ -177,7 +177,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
               <span className="text-sm text-gray-500">Not configured</span>
               <button
                 onClick={onRestartWizard}
-                className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
               >
                 Set up
               </button>
@@ -188,7 +188,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
 
       {/* ── WAN Interfaces ──────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">
           WAN Interfaces
         </h2>
         {wanCards.length > 0 ? (
@@ -218,12 +218,12 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                 {wan.active != null && (
                   <div className="shrink-0 ml-3">
                     {wan.active ? (
-                      <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 leading-none">
+                      <span className="flex items-center gap-1.5 text-sm text-emerald-400 leading-none">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 block" />
                         Active
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1.5 text-[11px] text-gray-500 leading-none">
+                      <span className="flex items-center gap-1.5 text-sm text-gray-500 leading-none">
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-600 block" />
                         Inactive
                       </span>
@@ -242,7 +242,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
 
       {/* ── Network Segments ─────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">
           Network Labels
         </h2>
         {networkCards.length > 0 ? (
@@ -278,20 +278,19 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
       {/* ── VPN Networks ──────────────────────────────────────── */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+            <h2 className="text-base font-semibold text-gray-300 uppercase tracking-wider">
               VPN Networks
-              <span className="ml-2 text-xs font-medium normal-case tracking-normal px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">Experimental</span>
             </h2>
             <div className="flex items-center gap-2">
               {saveMsg && (
-                <span className={`text-xs ${saveMsg.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'}`}>
+                <span className={`text-sm ${saveMsg.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'}`}>
                   {saveMsg}
                 </span>
               )}
               {!editing ? (
                 <button
                   onClick={startEditing}
-                  className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                  className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                 >
                   Edit
                 </button>
@@ -300,14 +299,14 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                   <button
                     onClick={cancelEditing}
                     disabled={saving}
-                    className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
+                    className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSave}
                     disabled={saving}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
+                    className="px-3 py-1.5 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
                   >
                     {saving ? 'Saving...' : 'Save'}
                   </button>
@@ -381,12 +380,12 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                 <div className={vpnEntries.length > 0 ? 'mt-4' : ''}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Unlabelled</h3>
+                      <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Unlabelled</h3>
                       <p className="text-xs text-gray-500 mt-1">Auto-detected from your firewall logs. Labels have been pre-filled where possible — click Configure to review and save.</p>
                     </div>
                     <button
                       onClick={() => configureDiscovered(unlabeledVpn)}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white transition-colors"
                     >
                       Configure All ({unlabeledVpn.length})
                     </button>
@@ -415,7 +414,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                           </div>
                           <button
                             onClick={() => configureDiscovered([i])}
-                            className="shrink-0 px-2.5 py-1 rounded text-xs font-medium border border-teal-500/40 text-teal-400 hover:bg-teal-500/10 transition-colors"
+                            className="shrink-0 px-2.5 py-1 rounded text-sm font-medium border border-teal-500/40 text-teal-400 hover:bg-teal-500/10 transition-colors"
                           >
                             Configure
                           </button>

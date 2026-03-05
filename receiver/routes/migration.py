@@ -286,11 +286,19 @@ def patch_compose(req: PatchComposeRequest):
         env.update(db_vars)
         for k in ssl_keys_to_remove:
             env.pop(k, None)
+        # Rename POSTGRES_PASSWORD → SECRET_KEY
+        if 'POSTGRES_PASSWORD' in env:
+            val = (env.pop('POSTGRES_PASSWORD') or '').strip()
+            if val:
+                env.setdefault('SECRET_KEY', val)
+            else:
+                logger.warning("POSTGRES_PASSWORD is empty — skipping SECRET_KEY (encryption key must not be blank)")
     elif isinstance(env, list):
         # List format — update in-place, append new
         db_keys_set = set(db_vars.keys()) | ssl_keys_to_remove
         new_env = []
         seen = set()
+        pg_password_val = None
         for item in env:
             key = str(item).split('=', 1)[0] if '=' in str(item) else str(item)
             if key in db_keys_set:
@@ -298,12 +306,26 @@ def patch_compose(req: PatchComposeRequest):
                     new_env.append(f'{key}={db_vars[key]}')
                     seen.add(key)
                 # else: skip (removal or duplicate)
+            elif key == 'POSTGRES_PASSWORD':
+                # Capture value and rename to SECRET_KEY
+                pg_password_val = str(item).split('=', 1)[1] if '=' in str(item) else ''
             else:
                 new_env.append(item)
         # Append any DB vars not yet in the list
         for k, v in db_vars.items():
             if k not in seen:
                 new_env.append(f'{k}={v}')
+        # Add SECRET_KEY if POSTGRES_PASSWORD was found and SECRET_KEY isn't already present
+        if pg_password_val is not None:
+            has_secret_key = any(
+                str(i).split('=', 1)[0] == 'SECRET_KEY' for i in new_env
+            )
+            if not has_secret_key:
+                stripped = pg_password_val.strip()
+                if not stripped:
+                    logger.warning("POSTGRES_PASSWORD is empty — skipping SECRET_KEY (encryption key must not be blank)")
+                else:
+                    new_env.append(f'SECRET_KEY={stripped}')
         svc['environment'] = new_env
     else:
         # No environment key or unexpected type — create as map

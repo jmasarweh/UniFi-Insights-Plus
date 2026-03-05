@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from psycopg2.extras import RealDictCursor
 
 from db import get_config, get_wan_ips_from_config
-from deps import get_conn, put_conn, enricher_db
+from deps import get_conn, put_conn, enricher_db, ttl_cache
 from parsers import build_vpn_cidr_map, match_vpn_ip
 from query_helpers import build_log_query, validate_time_params
 from services import get_service_description
@@ -626,6 +626,7 @@ def export_csv_endpoint(
 
 
 @router.get("/api/services")
+@ttl_cache(seconds=30)
 def get_services():
     """Return distinct service names for autocomplete filtering."""
     conn = get_conn()
@@ -635,6 +636,7 @@ def get_services():
                 SELECT DISTINCT service_name
                 FROM logs
                 WHERE service_name IS NOT NULL
+                  AND timestamp > now() - interval '36 hours'
                 ORDER BY service_name
             """)
             services = [row[0] for row in cur.fetchall()]
@@ -649,6 +651,7 @@ def get_services():
 
 
 @router.get("/api/protocols")
+@ttl_cache(seconds=30)
 def get_protocols():
     """Return distinct protocols seen in logs for dropdown filtering."""
     conn = get_conn()
@@ -658,6 +661,7 @@ def get_protocols():
                 SELECT DISTINCT protocol
                 FROM logs
                 WHERE protocol IS NOT NULL
+                  AND timestamp > now() - interval '36 hours'
                 ORDER BY protocol
             """)
             protocols = [row[0] for row in cur.fetchall()]

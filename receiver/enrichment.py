@@ -159,7 +159,7 @@ class AbuseIPDBEnricher:
     STATS_FILE = '/tmp/abuseipdb_stats.json'
 
     def __init__(self, api_key: str = None, db=None):
-        self.api_key = api_key or os.environ.get('ABUSEIPDB_API_KEY', '')
+        self.api_key = api_key if api_key is not None else os.environ.get('ABUSEIPDB_API_KEY', '')
         self.cache = TTLCache(ttl_seconds=86400)  # 24h in-memory hot cache
         self.db = db  # Database instance for persistent threat cache
         self.enabled = bool(self.api_key)

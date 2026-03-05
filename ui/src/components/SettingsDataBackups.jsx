@@ -3,9 +3,10 @@ import {
   fetchRetentionConfig, updateRetentionConfig, runRetentionCleanup,
   exportConfig, importConfig,
   testMigrationConnection, startMigration, getMigrationStatus,
-  patchMigrationCompose, checkMigrationEnv
+  patchMigrationCompose
 } from '../api'
 import CopyButton from './CopyButton'
+import InfoTooltip from './InfoTooltip'
 
 const RETENTION_PRESETS = [30, 60, 90, 120, 180, 365]
 const DISK_CRITICAL_BYTES = 512 * 1024 * 1024       // 512 MB
@@ -29,12 +30,12 @@ function StepPill({ index, label, current }) {
   const active = index === current
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`w-5 h-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 ${
+      <span className={`w-5 h-5 rounded-full text-sm font-bold flex items-center justify-center shrink-0 ${
         done ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
         : active ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
         : 'bg-gray-800 text-gray-600 border border-gray-700'
       }`}>{done ? '\u2713' : index + 1}</span>
-      <span className={`text-xs ${active ? 'text-gray-200' : done ? 'text-gray-400' : 'text-gray-600'}`}>{label}</span>
+      <span className={`text-sm ${active ? 'text-gray-200' : done ? 'text-gray-400' : 'text-gray-600'}`}>{label}</span>
     </div>
   )
 }
@@ -53,8 +54,6 @@ function MigrationWizard() {
   const [composeOutput, setComposeOutput] = useState('')
   const [patchError, setPatchError] = useState(null)
   const [patching, setPatching] = useState(false)
-  const [envCheck, setEnvCheck] = useState(null)       // null | { has_db_password }
-  const [envChecking, setEnvChecking] = useState(false)
   const [migStatus, setMigStatus] = useState(null)
   const [migError, setMigError] = useState(null)
   const [isExternal, setIsExternal] = useState(false)
@@ -126,15 +125,6 @@ function MigrationWizard() {
     } finally { setPatching(false) }
   }
 
-  async function handleCheckEnv() {
-    setEnvChecking(true)
-    try {
-      const r = await checkMigrationEnv()
-      setEnvCheck(r)
-    } catch (e) {
-      setEnvCheck({ error: e.message })
-    } finally { setEnvChecking(false) }
-  }
 
   function setField(k, v) { setForm(prev => ({ ...prev, [k]: v })) }
 
@@ -142,7 +132,7 @@ function MigrationWizard() {
   if (isExternal) {
     return (
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
         <div className="rounded-lg border border-gray-700 bg-gray-950 p-5">
           <div className="flex items-start gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded px-3 py-2.5">
             <svg className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
@@ -157,7 +147,7 @@ function MigrationWizard() {
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
+      <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">Database Migration</h2>
       <div className="rounded-lg border border-gray-700 bg-gray-950">
         <div className="p-5 space-y-5">
           {/* Step indicator */}
@@ -177,7 +167,7 @@ function MigrationWizard() {
                 href={EXTERNAL_DB_WIKI_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                className="inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors"
               >
                 Stuck? Open the full external PostgreSQL guide
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -188,41 +178,42 @@ function MigrationWizard() {
               {/* Form */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label htmlFor="mig-host" className="block text-xs text-gray-400 mb-1">Host</label>
+                  <label htmlFor="mig-host" className="flex items-center gap-1 text-sm font-medium text-gray-200 mb-1">
+                    Host
+                    <InfoTooltip>
+                      <p>If PostgreSQL is in another Docker container on this host, use a host-routable address and mapped port (for example <code className="bg-gray-800 px-1 py-0.5 rounded text-blue-300">host.docker.internal:5432</code> on Docker Desktop or the host gateway IP on Linux).</p>
+                      <p>Do not use container bridge IPs like <code className="bg-gray-800 px-1 py-0.5 rounded text-blue-300">172.18.x.x</code>.</p>
+                    </InfoTooltip>
+                  </label>
                   <input id="mig-host" value={form.host} onChange={e => setField('host', e.target.value)}
                     placeholder="e.g. postgres or 192.168.1.50"
                     className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
-                  <p className="text-[11px] text-blue-400 mt-1">
-                    If PostgreSQL is in another Docker container on this host, use a host-routable address and mapped port
-                    (for example <code className="bg-gray-800 px-1 py-0.5 rounded">host.docker.internal:5432</code> on Docker Desktop
-                    or the host gateway IP on Linux). Do not use container bridge IPs like <code className="bg-gray-800 px-1 py-0.5 rounded">172.18.x.x</code>.
-                  </p>
                 </div>
                 <div>
-                  <label htmlFor="mig-port" className="block text-xs text-gray-400 mb-1">Port</label>
+                  <label htmlFor="mig-port" className="block text-sm font-medium text-gray-200 mb-1">Port</label>
                   <input id="mig-port" type="number" value={form.port} onChange={e => setField('port', parseInt(e.target.value) || 5432)}
                     className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
                 </div>
               </div>
               <div>
-                <label htmlFor="mig-dbname" className="block text-xs text-gray-400 mb-1">Database Name</label>
+                <label htmlFor="mig-dbname" className="block text-sm font-medium text-gray-200 mb-1">Database Name</label>
                 <input id="mig-dbname" value={form.dbname} readOnly
                   className="w-full px-3 py-1.5 rounded bg-gray-900/50 border border-gray-700 text-sm text-gray-500 cursor-not-allowed" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="mig-user" className="block text-xs text-gray-400 mb-1">Username</label>
+                  <label htmlFor="mig-user" className="block text-sm font-medium text-gray-200 mb-1">Username</label>
                   <input id="mig-user" value={form.user} onChange={e => setField('user', e.target.value)}
                     className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
                 </div>
                 <div>
-                  <label htmlFor="mig-password" className="block text-xs text-gray-400 mb-1">Password</label>
+                  <label htmlFor="mig-password" className="block text-sm font-medium text-gray-200 mb-1">Password</label>
                   <input id="mig-password" type="password" value={form.password} onChange={e => setField('password', e.target.value)}
                     className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none" />
                 </div>
               </div>
               <div>
-                <label htmlFor="mig-sslmode" className="block text-xs text-gray-400 mb-1">SSL Mode</label>
+                <label htmlFor="mig-sslmode" className="block text-sm font-medium text-gray-200 mb-1">SSL Mode</label>
                 <select id="mig-sslmode" value={form.sslmode} onChange={e => setField('sslmode', e.target.value)}
                   className="w-full px-3 py-1.5 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none">
                   <option value="disable">disable</option>
@@ -246,7 +237,7 @@ function MigrationWizard() {
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
                     )}
                   </svg>
-                  <div className="text-xs space-y-0.5">
+                  <div className="text-sm space-y-0.5">
                     <p className={testResult.success ? 'text-emerald-400' : 'text-red-400'}>{testResult.message}</p>
                     {testResult.connectivity_hint && (
                       <p className="text-yellow-400 mt-1">
@@ -273,19 +264,19 @@ function MigrationWizard() {
               {/* Buttons */}
               <div className="flex items-center justify-end gap-3">
                 <button onClick={handleTest} disabled={testing || !form.host.trim()}
-                  className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50">
+                  className="px-4 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50">
                   {testing ? 'Testing...' : 'Test Connection'}
                 </button>
                 {testResult?.success && !testResult.has_foreign_tables && (
                   <button onClick={handleStartMigration}
-                    className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors">
+                    className="px-4 py-1.5 rounded text-sm font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors">
                     Start Migration
                   </button>
                 )}
               </div>
 
               {migError && (
-                <div className="text-xs text-red-400">{migError}</div>
+                <div className="text-sm text-red-400">{migError}</div>
               )}
             </div>
           )}
@@ -299,14 +290,14 @@ function MigrationWizard() {
                   {/* Progress bar */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-300">{migStatus?.step || 'Starting...'}</span>
-                      <span className="text-xs text-gray-500 font-mono">{migStatus?.progress_pct || 0}%</span>
+                      <span className="text-sm text-gray-300">{migStatus?.step || 'Starting...'}</span>
+                      <span className="text-sm text-gray-500 font-mono">{migStatus?.progress_pct || 0}%</span>
                     </div>
                     <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full bg-teal-500 rounded-full transition-all duration-500 ease-out"
                         style={{ width: `${migStatus?.progress_pct || 0}%` }} />
                     </div>
-                    {migStatus?.message && <p className="text-xs text-gray-500 mt-1">{migStatus.message}</p>}
+                    {migStatus?.message && <p className="text-sm text-gray-500 mt-1">{migStatus.message}</p>}
                   </div>
 
                   {/* Warning */}
@@ -314,7 +305,7 @@ function MigrationWizard() {
                     <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                     </svg>
-                    <p className="text-xs text-yellow-400/90">Do not restart the container while migration is running. Large datasets may take several minutes to transfer.</p>
+                    <p className="text-sm text-yellow-400/90">Do not restart the container while migration is running. Large datasets may take several minutes to transfer.</p>
                   </div>
 
                   {/* Error state */}
@@ -324,11 +315,11 @@ function MigrationWizard() {
                         <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
                         </svg>
-                        <div className="text-xs text-red-400">{migError}</div>
+                        <div className="text-sm text-red-400">{migError}</div>
                       </div>
                       <div className="flex justify-end">
                         <button onClick={handleReset}
-                          className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
+                          className="px-4 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
                           Back to Configuration
                         </button>
                       </div>
@@ -349,14 +340,14 @@ function MigrationWizard() {
 
                   {/* Row count validation table */}
                   {migStatus?.details?.validation && (
-                    <div className="rounded border border-gray-700 overflow-hidden">
-                      <table className="w-full text-xs">
+                    <div className="rounded border border-gray-700 overflow-x-auto">
+                      <table className="w-full text-sm">
                         <thead>
                           <tr className="bg-gray-900">
-                            <th className="text-left px-3 py-1.5 text-gray-400 font-medium">Table</th>
-                            <th className="text-right px-3 py-1.5 text-gray-400 font-medium">Source</th>
-                            <th className="text-right px-3 py-1.5 text-gray-400 font-medium">Target</th>
-                            <th className="text-center px-3 py-1.5 text-gray-400 font-medium">Status</th>
+                            <th className="text-left px-3 py-1.5 text-gray-400 font-semibold">Table</th>
+                            <th className="text-right px-3 py-1.5 text-gray-400 font-semibold">Source</th>
+                            <th className="text-right px-3 py-1.5 text-gray-400 font-semibold">Target</th>
+                            <th className="text-center px-3 py-1.5 text-gray-400 font-semibold">Status</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -379,7 +370,7 @@ function MigrationWizard() {
 
                   <div className="flex justify-end">
                     <button onClick={() => setStep(2)}
-                      className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors">
+                      className="px-4 py-1.5 rounded text-sm font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors">
                       Continue
                     </button>
                   </div>
@@ -403,11 +394,11 @@ function MigrationWizard() {
                     onChange={e => setComposeInput(e.target.value)}
                     placeholder="Paste your docker-compose.yml here..."
                     rows={10}
-                    className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 font-mono focus:border-blue-500 focus:outline-none resize-y"
+                    className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 font-mono focus:border-blue-500 focus:outline-none resize-y"
                   />
                   <div className="flex justify-end">
                     <button onClick={handlePatchCompose} disabled={patching || !composeInput.trim()}
-                      className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors disabled:opacity-50">
+                      className="px-4 py-1.5 rounded text-sm font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors disabled:opacity-50">
                       {patching ? 'Generating...' : 'Generate Updated Compose'}
                     </button>
                   </div>
@@ -416,7 +407,7 @@ function MigrationWizard() {
                       <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
                       </svg>
-                      <p className="text-xs text-red-400">{patchError}</p>
+                      <p className="text-sm text-red-400">{patchError}</p>
                     </div>
                   )}
                 </div>
@@ -425,11 +416,11 @@ function MigrationWizard() {
               {/* Compose patcher — Phase 2: Result */}
               {composeOutput && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400">
+                  <p className="text-sm text-gray-400">
                     1. Copy and save the following as your <code className="bg-gray-800 px-1 py-0.5 rounded">docker-compose.yml</code>
                   </p>
                   <div className="relative rounded bg-gray-900 border border-gray-700 p-3">
-                    <pre className="text-xs text-gray-300 font-mono whitespace-pre overflow-x-auto max-h-96 overflow-y-auto">{composeOutput}</pre>
+                    <pre className="text-sm text-gray-300 font-mono whitespace-pre overflow-x-auto max-h-96 overflow-y-auto">{composeOutput}</pre>
                     <div className="absolute top-2 right-2">
                       <CopyButton text={composeOutput} />
                     </div>
@@ -437,57 +428,17 @@ function MigrationWizard() {
 
                   {/* Instructions */}
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs text-gray-400">
-                        2. Set <code className="bg-gray-800 px-1 py-0.5 rounded">DB_PASSWORD=&lt;password&gt;</code> in your <code className="bg-gray-800 px-1 py-0.5 rounded">.env</code> file
-                      </p>
-                      <button onClick={handleCheckEnv} disabled={envChecking}
-                        className="px-2 py-0.5 rounded text-[11px] font-medium border border-gray-600 text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors disabled:opacity-50 shrink-0">
-                        {envChecking ? 'Checking...' : 'Check Environment'}
-                      </button>
-                    </div>
-                    {envCheck && (
-                      <div className={`flex items-start gap-2 rounded px-3 py-2 ${
-                        envCheck.error ? 'bg-red-500/10 border border-red-500/30'
-                        : envCheck.has_db_password ? 'bg-emerald-500/10 border border-emerald-500/30'
-                        : 'bg-yellow-500/10 border border-yellow-500/30'
-                      }`}>
-                        <svg className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
-                          envCheck.error ? 'text-red-400'
-                          : envCheck.has_db_password ? 'text-emerald-400'
-                          : 'text-yellow-400'
-                        }`} fill="currentColor" viewBox="0 0 20 20">
-                          {envCheck.error ? (
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
-                          ) : envCheck.has_db_password ? (
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                          ) : (
-                            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                          )}
-                        </svg>
-                        <p className={`text-[11px] ${
-                          envCheck.error ? 'text-red-400'
-                          : envCheck.has_db_password ? 'text-emerald-400'
-                          : 'text-yellow-400'
-                        }`}>
-                          {envCheck.error ? envCheck.error
-                           : envCheck.has_db_password ? 'DB_PASSWORD is set in the environment.'
-                           : 'DB_PASSWORD is not set. Add it to your .env file before restarting.'}
-                        </p>
-                      </div>
-                    )}
-                    <p className="text-xs text-gray-400">
-                      3. Rename <code className="bg-gray-800 px-1 py-0.5 rounded">POSTGRES_PASSWORD</code> to <code className="bg-gray-800 px-1 py-0.5 rounded">SECRET_KEY</code> in your <code className="bg-gray-800 px-1 py-0.5 rounded">.env</code> file (keep the same value — it encrypts stored API keys. If this value changes, previously stored API keys cannot be decrypted.).
+                    <p className="text-sm text-gray-400">
+                      2. Set <code className="bg-gray-800 px-1 py-0.5 rounded">DB_PASSWORD</code> in your <code className="bg-gray-800 px-1 py-0.5 rounded">.env</code> file (the password you entered in step 1):
                     </p>
-                    {envCheck && !envCheck.error && !envCheck.has_secret_key && (
-                      <div className="flex items-start gap-2 rounded px-3 py-2 bg-yellow-500/10 border border-yellow-500/30">
-                        <svg className="w-3.5 h-3.5 shrink-0 mt-0.5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                        </svg>
-                        <p className="text-[11px] text-yellow-400">Neither SECRET_KEY nor POSTGRES_PASSWORD is set. API key encryption will not work.</p>
-                      </div>
-                    )}
-                    <p className="text-xs text-gray-400">
+                    <div className="flex items-center gap-2">
+                      <code className="bg-gray-800 px-2 py-1 rounded text-sm text-gray-300 font-mono">DB_PASSWORD={form.password}</code>
+                      <CopyButton text={`DB_PASSWORD=${form.password}`} />
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      3. Rename <code className="bg-gray-800 px-1 py-0.5 rounded">POSTGRES_PASSWORD</code> to <code className="bg-gray-800 px-1 py-0.5 rounded">SECRET_KEY</code> in your <code className="bg-gray-800 px-1 py-0.5 rounded">.env</code> file (keep the same value — it encrypts stored API keys. If this value changes, previously stored API keys cannot be decrypted.)
+                    </p>
+                    <p className="text-sm text-gray-400">
                       4. Run <code className="bg-gray-800 px-1 py-0.5 rounded">docker compose up -d</code>
                     </p>
                   </div>
@@ -497,23 +448,23 @@ function MigrationWizard() {
                     <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
                     </svg>
-                    <div className="text-[11px] text-blue-400/90 space-y-1">
+                    <div className="text-sm text-blue-400/90 space-y-1">
                       <p>
                         Your old embedded database volume (<code className="bg-gray-800 px-1 py-0.5 rounded">pgdata</code>) still exists on disk as a safety net.
-                        Once you've confirmed the external database is working, you can remove it with:
+                        Once you've confirmed the external database is working, remove it from the Unifi Log Insight project directory with:
                       </p>
-                      <code className="block bg-gray-800 px-2 py-1 rounded text-blue-300">docker compose down -v</code>
-                      <p className="text-blue-400/70">This only removes the old volume — your external database is unaffected.</p>
+                      <code className="block bg-gray-800 px-2 py-1 rounded text-blue-300">docker volume rm {(composeInput.match(/^volumes:\s*\n\s+pgdata:\s*\n\s+name:\s*(\S+)/m) || [])[1] || '<project>_pgdata'}</code>
+                      <p>This only removes the old embedded volume — your external database is unaffected. Do not use <code className="bg-gray-800 px-1 py-0.5 rounded">docker compose down -v</code> as it removes all volumes.</p>
                     </div>
                   </div>
 
                   <div className="flex justify-end">
-                    <button onClick={() => { setComposeOutput(''); setComposeInput(''); setEnvCheck(null) }}
-                      className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
+                    <button onClick={() => { setComposeOutput(''); setComposeInput('') }}
+                      className="px-4 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors">
                       Paste Different Compose File
                     </button>
                   </div>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-xs text-gray-500">
                     YAML comments from your original file are not preserved.
                   </p>
                 </div>
@@ -522,7 +473,7 @@ function MigrationWizard() {
                 href={EXTERNAL_DB_WIKI_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                className="inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300 transition-colors"
               >
                 Need help? Open the full external PostgreSQL guide
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -669,7 +620,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
     <div className="space-y-8">
       {/* ── Data Retention ─────────────────────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">
           Data Retention
         </h2>
         <div className="rounded-lg border border-gray-700 bg-gray-950">
@@ -677,7 +628,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
             {/* General retention slider */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm text-gray-300">Log retention</label>
+                <label className="text-sm font-medium text-gray-200">Log retention</label>
                 <span className="text-sm font-mono font-semibold text-gray-200">{retentionDays} days</span>
               </div>
               <input
@@ -686,14 +637,15 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                 max={365}
                 value={retentionDays}
                 onChange={e => setRetentionDays(Number(e.target.value))}
-                className="w-full accent-blue-500"
+                className="w-full accent-teal-500"
+                style={{ background: `linear-gradient(to right, #14b8a6 ${((retentionDays - 1) / 364) * 100}%, #374151 ${((retentionDays - 1) / 364) * 100}%)`, borderRadius: '999px', height: '6px' }}
               />
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {RETENTION_PRESETS.map(preset => (
                   <button
                     key={preset}
                     onClick={() => setRetentionDays(preset)}
-                    className={`text-[11px] font-mono px-2 py-0.5 rounded border transition-colors ${
+                    className={`text-sm font-mono px-2 py-0.5 rounded border transition-colors ${
                       retentionDays === preset
                         ? 'border-blue-500 text-blue-400 bg-blue-500/10'
                         : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300'
@@ -708,7 +660,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                   <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                   </svg>
-                  <p className="text-xs text-yellow-400/90">
+                  <p className="text-sm text-yellow-400/90">
                     Extended retention may affect query performance on large datasets. Ensure you have enough disk space.
                   </p>
                 </div>
@@ -718,7 +670,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
             {/* DNS retention input */}
             <div>
               <div className="flex items-center justify-between">
-                <label className="text-sm text-gray-300">DNS log retention</label>
+                <label className="text-sm font-medium text-gray-200">DNS log retention</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
@@ -726,9 +678,9 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                     max={365}
                     value={dnsRetentionDays}
                     onChange={e => setDnsRetentionDays(Math.max(1, Math.min(365, parseInt(e.target.value) || 1)))}
-                    className="w-16 px-2 py-1 rounded bg-gray-900 border border-gray-600 font-mono text-xs text-gray-200 text-right focus:border-blue-500 focus:outline-none"
+                    className="w-16 px-2 py-1 rounded bg-gray-900 border border-gray-600 font-mono text-sm text-gray-200 text-right focus:border-blue-500 focus:outline-none"
                   />
-                  <span className="text-xs text-gray-500">days</span>
+                  <span className="text-sm text-gray-500">days</span>
                 </div>
               </div>
             </div>
@@ -738,7 +690,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
               <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
               </svg>
-              <p className="text-xs text-blue-400/90">
+              <p className="text-sm text-blue-400/90">
                 Time range filters in Log Stream and Dashboard automatically adjust to
                 show only ranges with available data. If logs from a previous retention
                 period haven't been cleaned up yet, filters may extend beyond your
@@ -756,13 +708,13 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
             return (
               <div className="px-5 pb-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Database size</span>
-                  <span className="text-xs text-gray-300 font-mono">{formatBytes(dbSize)}</span>
+                  <span className="text-sm text-gray-400">Database size</span>
+                  <span className="text-sm text-gray-300 font-mono">{formatBytes(dbSize)}</span>
                 </div>
                 {volAvail != null && (
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Disk space available</span>
-                    <span className={`text-xs font-mono ${critical ? 'text-red-400' : warning ? 'text-yellow-400' : 'text-gray-300'}`}>{formatBytes(volAvail)}</span>
+                    <span className="text-sm text-gray-400">Disk space available</span>
+                    <span className={`text-sm font-mono ${critical ? 'text-red-400' : warning ? 'text-yellow-400' : 'text-gray-300'}`}>{formatBytes(volAvail)}</span>
                   </div>
                 )}
                 {critical && (
@@ -770,7 +722,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                     <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                     </svg>
-                    <p className="text-xs text-red-400/90">
+                    <p className="text-sm text-red-400/90">
                       Disk space is critically low. Reduce retention or free up space to prevent log ingestion from stopping.
                     </p>
                   </div>
@@ -780,7 +732,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                     <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                     </svg>
-                    <p className="text-xs text-yellow-400/90">
+                    <p className="text-sm text-yellow-400/90">
                       Disk space is running low. Consider lowering retention days or increasing allocated disk space.
                     </p>
                   </div>
@@ -797,7 +749,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
             </p>
             <div className="flex items-center gap-3">
               {retentionMsg && (
-                <span className={`text-xs ${retentionMsg.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                <span className={`text-sm ${retentionMsg.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
                   {retentionMsg.text}
                 </span>
               )}
@@ -805,7 +757,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                 <button
                   onClick={handleCleanupNow}
                   disabled={cleaningUp}
-                  className="px-4 py-1.5 rounded text-xs font-medium border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+                  className="px-4 py-1.5 rounded text-sm font-medium border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
                 >
                   {cleaningUp ? 'Cleaning up...' : 'Run Cleanup Now'}
                 </button>
@@ -813,7 +765,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
               <button
                 onClick={saveRetention}
                 disabled={!retentionDirty || retentionSaving}
-                className={`px-4 py-1.5 rounded text-xs font-medium transition-colors ${
+                className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
                   retentionDirty
                     ? 'bg-teal-600 text-white hover:bg-teal-500'
                     : 'bg-gray-800 text-gray-500 cursor-not-allowed'
@@ -828,13 +780,13 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
 
       {/* ── Export / Import Configuration ──────────────────────── */}
       <section>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">
           Backup &amp; Restore
         </h2>
         <div className="rounded-lg border border-gray-700 bg-gray-950">
           {/* Export */}
           <div className="p-5">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">Export Configuration</h3>
+            <h3 className="text-sm font-medium text-gray-200 mb-2">Export Configuration</h3>
             <div className="space-y-2">
               <button
                 onClick={() => handleExport(false)}
@@ -842,14 +794,14 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                 className="w-full text-left rounded-lg border border-gray-700 hover:border-gray-500 p-3 transition-colors disabled:opacity-50"
               >
                 <div className="text-sm font-medium text-gray-200">Everything without API Key</div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 mt-1">
                   WAN Config, Network Labels, UniFi Connection (Host, Site, SSL, Polling), Retention Settings, UI Preferences
                 </p>
                 <div className="flex items-start gap-2 mt-1.5 bg-blue-500/10 border border-blue-500/30 rounded px-2.5 py-1.5">
                   <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
                   </svg>
-                  <p className="text-xs text-blue-400/90">
+                  <p className="text-sm text-blue-400/90">
                     You'll need to re-enter your UniFi API key after import, or regenerate one from your controller.
                     Self-hosted credentials (username/password) are never exported.
                   </p>
@@ -861,14 +813,14 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                 className="w-full text-left rounded-lg border border-gray-700 hover:border-gray-500 p-3 transition-colors disabled:opacity-50"
               >
                 <div className="text-sm font-medium text-gray-200">Everything + API Key</div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 mt-1">
                   All settings above plus your UniFi API key
                 </p>
                 <div className="flex items-start gap-2 mt-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded px-2.5 py-1.5">
                   <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                   </svg>
-                  <p className="text-xs text-yellow-400/90">
+                  <p className="text-sm text-yellow-400/90">
                     Your API key will be included in plaintext. Store this file securely.
                   </p>
                 </div>
@@ -881,7 +833,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
 
           {/* Import */}
           <div className="p-5">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">Import Configuration</h3>
+            <h3 className="text-sm font-medium text-gray-200 mb-2">Import Configuration</h3>
             <input
               ref={fileInputRef}
               type="file"
@@ -894,7 +846,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
               <div className="space-y-3">
                 <div className="rounded border border-gray-700 bg-gray-900 p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-gray-300">
+                    <span className="text-sm font-medium text-gray-300">
                       Backup from {importPreview.exported_at ? new Date(importPreview.exported_at).toLocaleDateString() : 'unknown date'}
                     </span>
                     {importPreview.version && (
@@ -903,7 +855,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-sm text-gray-500">
                     <span className="font-medium text-gray-400">{Object.keys(importPreview.config).length} settings</span> will be imported:
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1.5">
@@ -920,7 +872,7 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                       </span>
                     </div>
                   ) : (
-                    <p className="text-[11px] text-blue-400/70 mt-2">
+                    <p className="text-sm text-blue-400/70 mt-2">
                       No API key in this backup. Your existing key will be kept, or you can add one later in UniFi Settings.
                     </p>
                   )}
@@ -928,13 +880,13 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleImportConfirm}
-                    className="px-4 py-1.5 rounded text-xs font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors"
+                    className="px-4 py-1.5 rounded text-sm font-medium bg-teal-600 text-white hover:bg-teal-500 transition-colors"
                   >
                     Confirm Import
                   </button>
                   <button
                     onClick={cancelImport}
-                    className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
+                    className="px-4 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 transition-colors"
                   >
                     Cancel
                   </button>
@@ -943,14 +895,14 @@ export default function SettingsDataBackups({ totalLogs, storage }) {
             ) : (
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                className="px-4 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
               >
                 Import from File
               </button>
             )}
 
             {importMsg && (
-              <div className={`mt-2 text-xs ${importMsg.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+              <div className={`mt-2 text-sm ${importMsg.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
                 {importMsg.text}
               </div>
             )}

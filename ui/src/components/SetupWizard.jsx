@@ -317,8 +317,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
               : 'bg-gray-800/50 border-gray-700 text-gray-400'
           }`}>
-            <span className="text-xs font-medium">{s.num}</span>
-            <span className={`text-xs ${embedded ? '' : 'hidden sm:inline'}`}>{s.label}</span>
+            <span className={`text-sm font-medium ${embedded ? '' : 'hidden sm:inline'}`}>{s.label}</span>
           </div>
           {idx < steps.length - 1 && (
             <div className="w-6 h-px bg-gray-700" />
@@ -341,7 +340,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
             </svg>
             <div>
               <h1 className="text-lg font-semibold text-gray-200">UniFi Log Insight</h1>
-              <p className="text-xs text-gray-400">{reconfigMode ? 'Reconfigure' : 'Setup Wizard'}</p>
+              <p className="text-sm text-gray-400">{reconfigMode ? 'Reconfigure' : 'Setup Wizard'}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -349,7 +348,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
             {reconfigMode && onCancel && (
               <button
                 onClick={onCancel}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-300 hover:text-gray-200 bg-gray-800 hover:bg-gray-700 transition-colors"
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 hover:text-gray-200 bg-gray-800 hover:bg-gray-700 transition-colors"
               >
                 Cancel
               </button>
@@ -396,7 +395,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                     </p>
                   </div>
 
-                  <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400">
+                  <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-400">
                     Auto-detected from UniFi Controller
                   </div>
 
@@ -418,15 +417,15 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                               </span>
                             )}
                             {w.wan_ip && (
-                              <span className="text-xs font-mono text-gray-400">
+                              <span className="text-sm font-mono text-gray-400">
                                 {w.wan_ip}{w.tunnel_ip ? ` (tunnel: ${w.tunnel_ip})` : ''}
                               </span>
                             )}
                             {!isActive && (
-                              <span className="text-xs text-yellow-400/80">Inactive</span>
+                              <span className="text-sm text-yellow-400/80">Inactive</span>
                             )}
                           </div>
-                          <div className="flex items-center gap-4 text-xs text-gray-400">
+                          <div className="flex items-center gap-4 text-sm text-gray-400">
                             <span>Type: {w.type || 'unknown'}</span>
                             <span>|</span>
                             <div className="flex items-center gap-2">
@@ -437,7 +436,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                 onChange={e => handleApiWanInterfaceChange(idx, e.target.value)}
                                 onBlur={() => commitWanEdit(idx)}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.target.blur() } }}
-                                className={`w-24 px-2 py-1 rounded bg-gray-900 border font-mono text-xs text-gray-200 focus:border-blue-500 focus:outline-none ${
+                                className={`w-24 px-2 py-1 rounded bg-gray-900 border font-mono text-sm text-gray-200 focus:border-blue-500 focus:outline-none ${
                                   ifaceInvalid ? 'border-red-500/50' :
                                   isGuess && currentIface === w.physical_interface ? 'border-yellow-500/50' : 'border-gray-600'
                                 }`}
@@ -458,12 +457,12 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                 ? <span className="text-gray-500">(user edited)</span>
                                 : isGuess
                                   ? <span className="text-yellow-400/80">(best guess &mdash; edit if needed)</span>
-                                  : <span className="text-emerald-400/80">Verified from Gateway</span>
+                                  : <span className="text-emerald-400/80 whitespace-nowrap">Verified from Gateway</span>
                               }
                             </div>
                           </div>
                           {ifaceInvalid && (
-                            <p className="text-[11px] text-red-400 mt-1.5">
+                            <p className="text-sm text-red-400 mt-1.5">
                               {ifaceInvalid}
                             </p>
                           )}
@@ -489,7 +488,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                               )}
                               <button
                                 onClick={() => removeManualWan(iface)}
-                                className="text-gray-500 hover:text-red-400 text-xs ml-auto transition-colors"
+                                className="text-gray-500 hover:text-red-400 text-sm ml-auto transition-colors"
                                 title="Remove"
                               >
                                 &#x2715;
@@ -520,7 +519,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                         </button>
                       </div>
                       {manualWanError && (
-                        <p className="text-[11px] text-red-400 mt-1.5">{manualWanError}</p>
+                        <p className="text-sm text-red-400 mt-1.5">{manualWanError}</p>
                       )}
                     </div>
                   )}
@@ -530,7 +529,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                       <svg className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <p className="text-xs text-blue-400/90">
+                      <p className="text-sm text-blue-400/90">
                         Inactive WANs can still receive traffic (e.g. failover). Configure the interface name
                         so logs from that interface are labelled correctly.
                       </p>
@@ -540,14 +539,14 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                   <div className="flex justify-between pt-2">
                     <button
                       onClick={handleBack}
-                      className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={() => setStep(3)}
                       disabled={hasInvalidWan}
-                      className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                         hasInvalidWan
                           ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
                           : 'bg-teal-600 hover:bg-teal-500 text-white'
@@ -584,21 +583,21 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                     </p>
                   </div>
 
-                  <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400">
+                  <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-400">
                     Auto-detected from UniFi Controller &mdash; labels are editable
                   </div>
 
                   {/* ── WAN Interfaces ──────────────────────────────── */}
                   {(wanEntries.length > 0 || wanInterfaces.length > wanEntries.length) && (
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">WAN Interfaces</h3>
-                      <div className="overflow-hidden rounded-lg border border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">WAN Interfaces</h3>
+                      <div className="overflow-x-auto rounded-lg border border-gray-700">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="text-xs text-gray-400 border-b border-gray-700">
-                              <th className="px-4 py-2 text-left font-medium">Interface</th>
-                              <th className="px-4 py-2 text-left font-medium">WAN IP</th>
-                              <th className="px-4 py-2 text-left font-medium">Network Label</th>
+                            <tr className="text-sm text-gray-400 border-b border-gray-700">
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Interface</th>
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">WAN IP</th>
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Network Label</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -620,7 +619,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
+                                  <td className="px-4 py-2.5 font-mono text-sm text-gray-400">
                                     {w.wan_ip || '\u2014'}
                                     {w.tunnel_ip && <span className="text-gray-600 ml-1">(tunnel: {w.tunnel_ip})</span>}
                                   </td>
@@ -650,7 +649,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                     </span>
                                   </div>
                                 </td>
-                                <td className="px-4 py-2.5 font-mono text-xs text-gray-400">{'\u2014'}</td>
+                                <td className="px-4 py-2.5 font-mono text-sm text-gray-400">{'\u2014'}</td>
                                 <td className="px-4 py-2.5">
                                   <input
                                     type="text"
@@ -672,14 +671,14 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                   {/* ── VLAN / Network Labels ──────────────────────── */}
                   {(apiNetConfig?.networks || []).length > 0 && (
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">Network Labels</h3>
-                      <div className="overflow-hidden rounded-lg border border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">Network Labels</h3>
+                      <div className="overflow-x-auto rounded-lg border border-gray-700">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="text-xs text-gray-400 border-b border-gray-700">
-                              <th className="px-4 py-2 text-left font-medium">Interface</th>
-                              <th className="px-4 py-2 text-left font-medium">Network Label</th>
-                              <th className="px-4 py-2 text-left font-medium">
+                            <tr className="text-sm text-gray-400 border-b border-gray-700">
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Interface</th>
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">Network Label</th>
+                              <th className="px-4 py-2 text-left font-semibold whitespace-nowrap">
                                 <div>Network Pool / CIDR</div>
                                 <div className="font-normal text-xs text-gray-500 normal-case tracking-normal">First IP = Gateway</div>
                               </th>
@@ -707,7 +706,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                                     className="w-32 px-2 py-1 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
                                   />
                                 </td>
-                                <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
+                                <td className="px-4 py-2.5 font-mono text-sm text-gray-400">
                                   {n.ip_subnet || '\u2014'}
                                 </td>
                               </tr>
@@ -721,9 +720,8 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                   {/* ── VPN Networks ────────────────────────────────── */}
                   {vpnSegments.length > 0 && (
                     <section>
-                      <h3 className="text-sm font-semibold text-gray-300 mb-2 uppercase tracking-wider">
+                      <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">
                         VPN Networks
-                        <span className="ml-2 text-xs font-medium normal-case tracking-normal px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">Experimental</span>
                       </h3>
                       <VpnNetworkTable
                         entries={[...vpnSegments].sort((a, b) => {
@@ -769,20 +767,20 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                   <div className="flex justify-between pt-2">
                     <button
                       onClick={handleBack}
-                      className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={supportsFirewall ? () => setStep(4) : handleFinish}
                       disabled={!supportsFirewall && saving}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
                     >
                       {supportsFirewall ? 'Next' : (saving ? 'Saving...' : 'Finish')}
                     </button>
                   </div>
                   {!supportsFirewall && saveError && (
-                    <div className="mt-4 px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+                    <div className="mt-4 px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-sm text-red-400">
                       Failed to save: {saveError}
                     </div>
                   )}
@@ -804,7 +802,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                     disabled={saving}
                   />
                   {saveError && (
-                    <div className="mt-4 px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+                    <div className="mt-4 px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-sm text-red-400">
                       Failed to save: {saveError}
                     </div>
                   )}
@@ -826,14 +824,14 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                     <button
                       onClick={handleBack}
                       disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={handleFinish}
                       disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
                     >
                       {saving ? 'Saving...' : 'Finish'}
                     </button>
@@ -844,7 +842,7 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                   </div>
 
                   {saveError && (
-                    <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400">
+                    <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/30 text-sm text-red-400">
                       Failed to save: {saveError}
                     </div>
                   )}
@@ -853,14 +851,14 @@ export default function SetupWizard({ onComplete, reconfigMode, onCancel, embedd
                     <button
                       onClick={handleBack}
                       disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                     >
                       Back
                     </button>
                     <button
                       onClick={handleFinish}
                       disabled={saving}
-                      className="px-3 py-1.5 rounded text-xs font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
+                      className="px-3 py-1.5 rounded text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50 transition-colors"
                     >
                       {saving ? 'Saving...' : 'Finish'}
                     </button>

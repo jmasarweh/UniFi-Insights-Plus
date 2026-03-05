@@ -379,7 +379,7 @@ function FilterBar({ filters, onFilterChange, onBulk, bulkAction, zoneScopeLabel
         ))}
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-[#676f79] hidden md:flex items-center gap-1">
+        <span className="text-[11px] text-[#676f79] flex items-center gap-1">
           {zoneScopeLabel ? (
             <>
               <span className="text-[#cbced2]">{zoneScopeLabel}</span> Toggles
@@ -450,11 +450,11 @@ function PolicyRow({ policy, zoneMap, onToggle, toggling, isSubRow }) {
         {policy.ipProtocolScope?.protocolFilter?.protocol?.name || policy.protocol || 'All'}
       </td>
       {/* Src Zone */}
-      <td className="px-2 pr-8 py-0 h-8 text-[11px] text-[#cbced2] truncate">
+      <td className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] text-[#cbced2] truncate">
         {zoneMap[policy.source?.zoneId] || '\u2014'}
       </td>
       {/* Dst Zone */}
-      <td className="px-2 pr-8 py-0 h-8 text-[11px] text-[#cbced2] truncate">
+      <td className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] text-[#cbced2] truncate">
         {zoneMap[policy.destination?.zoneId] || '\u2014'}
       </td>
       {/* ID */}
@@ -534,8 +534,8 @@ function GroupHeaderRow({ group, expanded, onToggle, onToggleExpand, toggling })
       <td className="px-2 pr-8 py-0 h-8 text-[11px] text-[#676f79] uppercase truncate">
         {uniformProtocol || 'Mixed'}
       </td>
-      <td className="px-2 pr-8 py-0 h-8 text-[11px] text-[#676f79] truncate">Multiple</td>
-      <td className="px-2 pr-8 py-0 h-8 text-[11px] text-[#676f79] truncate">Multiple</td>
+      <td className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] text-[#676f79] truncate">Multiple</td>
+      <td className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] text-[#676f79] truncate">Multiple</td>
       <td className="px-2 pr-8 py-0 h-8 text-[11px] font-mono text-[#676f79]">&mdash;</td>
       <td className="px-2 py-0 h-8" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-1">
@@ -871,21 +871,21 @@ export default function FirewallRules() {
       <div className="scroll-fade border-b border-white/[0.07]">
         <table className="w-full table-fixed border-collapse">
           <colgroup>
-            <col style={{ width: '40%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '10%' }} />
+            <col className="w-[50%] sm:w-[40%]" />
+            <col className="w-[14%] sm:w-[9%]" />
+            <col className="w-[12%] sm:w-[8%]" />
+            <col className="hidden sm:table-column sm:w-[13%]" />
+            <col className="hidden sm:table-column sm:w-[13%]" />
+            <col className="w-[12%] sm:w-[7%]" />
+            <col className="w-[12%] sm:w-[10%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-white/[0.07]">
               <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Name</th>
               <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Action</th>
-              <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Protocol</th>
-              <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Src Zone</th>
-              <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Dst Zone</th>
+              <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Proto</th>
+              <th className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Src Zone</th>
+              <th className="hidden sm:table-cell px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Dst Zone</th>
               <th className="px-2 pr-8 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">ID</th>
               <th className="px-2 py-0 h-8 text-[11px] font-semibold text-[#f9fafa] uppercase tracking-[0.5px] text-left">Syslog</th>
             </tr>

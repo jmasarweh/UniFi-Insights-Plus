@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from psycopg2.extras import RealDictCursor, Json
 
 from db import get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key
-from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION
+from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
 from parsers import (
     VPN_PREFIX_BADGES, VPN_INTERFACE_PREFIXES, VPN_BADGE_CHOICES,
     VPN_BADGE_LABELS, VPN_PREFIX_DESCRIPTIONS,
@@ -254,11 +254,15 @@ def complete_setup(body: dict):
 
 
 @router.get("/api/interfaces")
+@ttl_cache(seconds=30)
 def list_interfaces():
     """Return all discovered interfaces with their labels and type metadata."""
     labels = get_config(enricher_db, "interface_labels", {})
     wan_list = set(get_config(enricher_db, "wan_interfaces", ["ppp0"]))
     vpn_networks = get_config(enricher_db, "vpn_networks", {})
+
+    # Seed from config — always complete, even if logs were retention-cleaned
+    config_ifaces = set(wan_list) | set(labels.keys()) | set(vpn_networks.keys())
 
     conn = get_conn()
     try:
@@ -267,14 +271,17 @@ def list_interfaces():
                 SELECT DISTINCT unnest(ARRAY[interface_in, interface_out]) as iface
                 FROM logs
                 WHERE log_type = 'firewall'
+                  AND timestamp > now() - interval '36 hours'
                   AND (interface_in IS NOT NULL OR interface_out IS NOT NULL)
             """)
-            interfaces = [row[0] for row in cur.fetchall() if row[0]]
+            log_ifaces = {row[0] for row in cur.fetchall() if row[0]}
     except Exception as e:
         logger.exception("Error querying interfaces")
         raise HTTPException(status_code=500, detail="Failed to query interfaces") from e
     finally:
         put_conn(conn)
+
+    interfaces = config_ifaces | log_ifaces
 
     result = []
     for iface in sorted(interfaces):

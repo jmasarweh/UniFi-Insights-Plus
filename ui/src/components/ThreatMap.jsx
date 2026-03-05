@@ -61,28 +61,25 @@ function applyLayers(map, geoData, view, _retry) {
         type: 'heatmap',
         source: 'threats',
         paint: {
-          // Give every point high weight so sparse data is visible
           'heatmap-weight': ['interpolate', ['linear'], ['get', 'count'],
-            1, 0.5, 10, 1, 50, 1.5, 200, 2,
+            1, 0.3, 10, 0.6, 50, 0.9, 200, 1,
           ],
-          // High intensity even at low zoom
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'],
-            0, 3, 4, 4, 9, 6,
+            0, 1, 4, 1.5, 9, 2.5,
           ],
-          // Color ramp from transparent → blue → amber → red → dark red
+          // Warm-only ramp — avoids blue which conflicts with threat score legend
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0,   'rgba(0,0,0,0)',
-            0.05, 'rgba(59,130,246,0.3)',
-            0.2, 'rgb(59,130,246)',
+            0.05, 'rgba(250,204,21,0.2)',
+            0.2, 'rgb(250,204,21)',
             0.4, 'rgb(245,158,11)',
             0.6, 'rgb(239,68,68)',
             0.8, 'rgb(220,38,38)',
             1,   'rgb(153,27,27)',
           ],
-          // Large radius so sparse points produce visible blobs
           'heatmap-radius': ['interpolate', ['linear'], ['zoom'],
-            0, 50, 3, 60, 6, 70, 9, 90,
+            0, 15, 3, 25, 6, 35, 9, 45,
           ],
           // Stay visible at all zoom levels
           'heatmap-opacity': ['interpolate', ['linear'], ['zoom'],

@@ -5,9 +5,11 @@ Singletons (database pools, enrichers, UniFi client) are initialized here
 at import time and imported by route modules via `from deps import ...`.
 """
 
+import functools
 import logging
 import os
 import subprocess
+import threading
 import time
 
 from psycopg2 import pool
@@ -39,16 +41,30 @@ wait_for_postgres(conn_params)
 db_pool = pool.ThreadedConnectionPool(2, 10, **conn_params)
 
 
-def get_conn():
-    """Get a pooled connection with statement_timeout for API routes."""
-    conn = db_pool.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SET statement_timeout = '30s'")
-    except Exception:
-        db_pool.putconn(conn, close=True)
-        raise
-    return conn
+def get_conn(retries=3, wait=0.5):
+    """Get a pooled connection with statement_timeout for API routes.
+
+    Retries briefly on pool exhaustion instead of failing immediately.
+    """
+    last_err = None
+    for attempt in range(retries):
+        try:
+            conn = db_pool.getconn()
+        except pool.PoolError as e:
+            last_err = e
+            if attempt < retries - 1:
+                logger.warning("Connection pool exhausted, retrying (%d/%d)", attempt + 1, retries)
+                time.sleep(wait * (attempt + 1))
+                continue
+            raise
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET statement_timeout = '30s'")
+        except Exception:
+            db_pool.putconn(conn, close=True)
+            raise
+        return conn
+    raise last_err
 
 
 def put_conn(conn):
@@ -65,6 +81,31 @@ abuseipdb = AbuseIPDBEnricher(db=enricher_db)
 # ── UniFi API Client ────────────────────────────────────────────────────────
 
 unifi_api = UniFiAPI(db=enricher_db)
+
+
+# ── Caching ──────────────────────────────────────────────────────────────────
+
+def ttl_cache(seconds=30):
+    """Thread-safe TTL cache for expensive endpoint results."""
+    def decorator(fn):
+        lock = threading.Lock()
+        cached = {'result': None, 'expires': 0}
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            now = time.monotonic()
+            if cached['result'] is not None and now < cached['expires']:
+                return cached['result']
+            with lock:
+                # Double-check after acquiring lock
+                if cached['result'] is not None and now < cached['expires']:
+                    return cached['result']
+                result = fn(*args, **kwargs)
+                cached['result'] = result
+                cached['expires'] = time.monotonic() + seconds
+                return result
+        return wrapper
+    return decorator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

@@ -133,18 +133,18 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
       {!loading && !error && candidates.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-gray-300">
+            <h3 className="text-base font-semibold text-gray-300 uppercase tracking-wider">
               Detected in your logs
             </h3>
             <button
               onClick={handleRescan}
               disabled={rescanning}
-              className="text-xs px-3 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
+              className="text-sm px-3 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50"
             >
               {rescanning ? 'Scanning...' : 'Rescan Logs'}
             </button>
           </div>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-sm text-gray-400 mb-3">
             Click on the interface that is your WAN. You can select multiple.
           </p>
           <div className="space-y-2">
@@ -169,10 +169,10 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
                     {c.interface}
                   </span>
                   {c.wan_ip && (
-                    <span className="text-xs font-mono text-gray-400">{c.wan_ip}</span>
+                    <span className="text-sm font-mono text-gray-400">{c.wan_ip}</span>
                   )}
                 </div>
-                <span className="text-xs text-gray-400">
+                <span className="text-sm text-gray-400">
                   {c.event_count?.toLocaleString()} events
                 </span>
               </div>
@@ -194,7 +194,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
             <button
               onClick={handleRescan}
               disabled={rescanning}
-              className="text-xs px-3 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50 ml-4 shrink-0"
+              className="text-sm px-3 py-1 rounded border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50 ml-4 shrink-0"
             >
               {rescanning ? 'Scanning...' : 'Rescan'}
             </button>
@@ -205,10 +205,10 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
       {/* Common UniFi WAN interfaces */}
       {!loading && !error && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">
             Common UniFi WAN interfaces
           </h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-sm text-gray-400 mb-3">
             If your interface wasn't detected above, pick it from this list.
             You can select multiple.
           </p>
@@ -233,7 +233,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
                   <span className="text-sm font-mono font-semibold text-gray-200">
                     {iface.name}
                   </span>
-                  <span className="text-xs text-gray-400">{iface.desc}</span>
+                  <span className="text-sm text-gray-400">{iface.desc}</span>
                 </div>
                 {iface.note && (
                   <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -249,10 +249,10 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
       {/* Manual entry */}
       {!loading && !error && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">
             Custom interface name
           </h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-sm text-gray-400 mb-3">
             If your WAN interface isn't listed above, type its name and press
             Enter or click Add. You can add multiple.
           </p>
@@ -278,7 +278,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
             </button>
           </div>
           {manualError && (
-            <p className="text-[11px] text-red-400 mt-1.5">{manualError}</p>
+            <p className="text-sm text-red-400 mt-1.5">{manualError}</p>
           )}
         </div>
       )}
@@ -286,7 +286,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
       {/* Selected summary */}
       {!loading && !error && selected.length > 0 && (
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-blue-400 mb-2">
+          <h3 className="text-base font-semibold text-blue-400 mb-2">
             Selected ({selected.length})
           </h3>
           <div className="flex flex-wrap gap-2">
@@ -295,7 +295,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
                 <span className="text-sm font-mono text-blue-300">{iface}</span>
                 <button
                   onClick={() => handleToggle(iface)}
-                  className="text-blue-400 hover:text-blue-300 text-xs"
+                  className="text-blue-400 hover:text-blue-300 text-sm"
                   title="Remove"
                 >
                   ✕
@@ -309,10 +309,10 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
       {/* WAN Interface Labels */}
       {!loading && !error && selected.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">
+          <h3 className="text-base font-semibold text-gray-300 mb-2 uppercase tracking-wider">
             Add a Label to your WAN Interfaces
           </h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-sm text-gray-400 mb-3">
             Give each WAN interface a friendly name, e.g. &quot;WAN Primary&quot; or &quot;WAN Backup&quot;.
           </p>
           <div className="space-y-2">
@@ -350,7 +350,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
           {onBack ? (
             <button
               onClick={onBack}
-              className="px-3 py-1.5 rounded text-xs font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
             >
               Back
             </button>
@@ -358,7 +358,7 @@ export default function WizardStepWAN({ selected, onSelect, interfaceLabels, onU
           <button
             onClick={handleNextWithDefaults}
             disabled={selected.length === 0}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
               selected.length > 0
                 ? 'bg-teal-600 hover:bg-teal-500 text-white'
                 : 'bg-gray-800 text-gray-400 cursor-not-allowed'

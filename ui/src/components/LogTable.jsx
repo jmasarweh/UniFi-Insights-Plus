@@ -125,7 +125,7 @@ function LogRow({ log, isExpanded, detailedLog, onToggle, hiddenColumns, colCoun
 
         {/* Type — desktop only */}
         <td className="hidden sm:table-cell px-2 py-1.5">
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border ${typeStyle}`}>
+          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border ${typeStyle}`}>
             {log.log_type}
           </span>
         </td>
