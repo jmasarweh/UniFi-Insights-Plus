@@ -55,7 +55,7 @@ def enrich_ip(ip: str):
     if not abuseipdb.enabled:
         raise HTTPException(status_code=400, detail="AbuseIPDB not configured")
 
-    # Budget check: use shared stats file as source of truth
+    # Budget check: use centralized AbuseIPDB stats from enricher DB
     budget_stats = get_abuseipdb_stats(enricher_db)
     if budget_stats:
         # Block if actively paused (429 back-off)

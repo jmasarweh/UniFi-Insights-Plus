@@ -83,4 +83,20 @@ describe('getThreatLevel', () => {
   it('returns null for NaN', () => {
     expect(getThreatLevel(NaN)).toBeNull()
   })
+
+  it('handles floating-point scores within tier ranges', () => {
+    expect(getThreatLevel(24.5).label).toBe('Low')
+    expect(getThreatLevel(74.9).label).toBe('High')
+    expect(getThreatLevel(49.99).label).toBe('Medium')
+  })
+
+  it('negative scores fall through to Clean (AbuseIPDB returns 0-100)', () => {
+    expect(getThreatLevel(-1).label).toBe('Clean')
+    expect(getThreatLevel(-10).label).toBe('Clean')
+  })
+
+  it('coerces string scores via JS comparison', () => {
+    expect(getThreatLevel('75').label).toBe('Critical')
+    expect(getThreatLevel('0').label).toBe('Clean')
+  })
 })
