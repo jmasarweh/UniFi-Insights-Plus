@@ -275,6 +275,48 @@ export async function bulkUpdateFirewallLogging(policies) {
   return resp.json()
 }
 
+export async function bulkUpdateFirewallLoggingStream(policies, onProgress) {
+  const resp = await fetch(`${BASE}/firewall/policies/bulk-logging-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ policies })
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    throw new Error(body.detail || `API error: ${resp.status}`)
+  }
+  if (!resp.body) throw new Error('Response body is empty, streaming not supported')
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalResult = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n\n')
+    buffer = lines.pop()
+    for (const chunk of lines) {
+      const line = chunk.replace(/^data: /, '').trim()
+      if (!line) continue
+      try {
+        const msg = JSON.parse(line)
+        if (msg.event === 'progress') {
+          onProgress?.(msg)
+        } else if (msg.event === 'complete') {
+          finalResult = msg
+        } else if (msg.event === 'error') {
+          throw new Error(msg.detail || 'Bulk update failed')
+        }
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e
+      }
+    }
+  }
+  return finalResult
+}
+
 // ── UniFi Device Names (Phase 2) ────────────────────────────────────────────
 
 export async function fetchUniFiStatus() {

@@ -1,12 +1,14 @@
 """UniFi settings, connection test, firewall proxy, and device endpoints."""
 
+import json
 import logging
 import os
+import threading
 
 import requests as _requests
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from psycopg2.extras import RealDictCursor
 
 from db import get_config, set_config, encrypt_api_key, decrypt_api_key
@@ -281,6 +283,56 @@ def bulk_update_logging(body: dict):
     except Exception as e:
         logger.exception("Bulk firewall update failed")
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.post("/api/firewall/policies/bulk-logging-stream")
+def bulk_update_logging_stream(body: dict):
+    """SSE stream: bulk-update loggingEnabled with live progress events."""
+    if not unifi_api.enabled:
+        raise HTTPException(status_code=400, detail="UniFi API not configured")
+    if not unifi_api.features.get('firewall_management', True):
+        raise HTTPException(status_code=400,
+            detail="Firewall management requires a UniFi OS gateway (not available on self-hosted controllers)")
+
+    policies = body.get('policies', [])
+    if not policies:
+        raise HTTPException(status_code=400, detail="policies list is required")
+
+    def _event_stream():
+        # Thread-safe event queue for progress updates
+        import queue
+        q = queue.Queue()
+
+        def on_progress(completed, total, success, failed, phase='patching'):
+            q.put({'event': 'progress', 'completed': completed, 'total': total,
+                    'success': success, 'failed': failed, 'phase': phase})
+
+        def run_bulk():
+            try:
+                result = unifi_api.bulk_patch_logging(policies, progress_callback=on_progress)
+                q.put({'event': 'complete', **result})
+            except UniFiPermissionError as e:
+                q.put({'event': 'error', 'detail': str(e)})
+            except Exception as e:
+                logger.exception("Bulk firewall stream failed")
+                q.put({'event': 'error', 'detail': str(e)})
+            finally:
+                q.put(None)  # sentinel
+
+        t = threading.Thread(target=run_bulk, daemon=True)
+        t.start()
+
+        while True:
+            msg = q.get()
+            if msg is None:
+                break
+            yield f"data: {json.dumps(msg)}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Phase 2: Device Endpoints ────────────────────────────────────────────

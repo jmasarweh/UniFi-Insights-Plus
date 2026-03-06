@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { fetchFirewallPolicies, patchFirewallPolicy, bulkUpdateFirewallLogging } from '../api'
+import { fetchFirewallPolicies, patchFirewallPolicy, bulkUpdateFirewallLoggingStream } from '../api'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -359,7 +359,7 @@ const FILTER_OPTIONS = [
   { key: 'paused', label: 'Paused' },
 ]
 
-function FilterBar({ filters, onFilterChange, onBulk, bulkAction, zoneScopeLabel }) {
+function FilterBar({ filters, onFilterChange, onBulk, bulkAction, zoneScopeLabel, allEnabled, allDisabled }) {
   return (
     <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
       <div className="flex items-center gap-3">
@@ -395,14 +395,14 @@ function FilterBar({ filters, onFilterChange, onBulk, bulkAction, zoneScopeLabel
         </span>
         <button
           onClick={() => onBulk(true)}
-          disabled={!!bulkAction}
+          disabled={!!bulkAction || allEnabled}
           className="px-2.5 py-1 rounded text-[11px] font-medium text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/20 disabled:opacity-40 transition-colors"
         >
           {bulkAction === 'enable' ? 'Enabling...' : 'Enable All Logging'}
         </button>
         <button
           onClick={() => onBulk(false)}
-          disabled={!!bulkAction}
+          disabled={!!bulkAction || allDisabled}
           className="disable-logging-btn px-2.5 py-1 rounded text-[11px] font-medium text-[#cbced2] hover:text-[#f9fafa] border border-white/[0.07] hover:border-white/[0.15] disabled:opacity-40 transition-colors"
         >
           {bulkAction === 'disable' ? 'Disabling...' : 'Disable All Logging'}
@@ -555,52 +555,104 @@ function GroupHeaderRow({ group, expanded, onToggle, onToggleExpand, toggling })
 
 // ── Confirmation Modal ──────────────────────────────────────────────────────
 
-function BulkConfirmModal({ action, count, srcZone, dstZone, onConfirm, onCancel }) {
+function BulkConfirmModal({ action, count, srcZone, dstZone, onConfirm, onCancel, progress }) {
   const verb = action === 'enable' ? 'Enable' : 'Disable'
+  const isRunning = !!progress
+
+  const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={onCancel}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={isRunning ? undefined : onCancel}>
       <div
         className="bg-black border border-white/[0.07] rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold text-[#f9fafa] mb-3">
-          {verb} Syslog Logging
+        <h3 className="text-base font-semibold text-[#f9fafa] mb-3">
+          {isRunning ? (action === 'enable' ? 'Enabling' : 'Disabling') + ' Syslog Logging' : verb + ' Syslog Logging'}
         </h3>
 
-        <div className="text-[12px] text-[#cbced2] space-y-2 mb-4">
-          <p>
-            {verb} logging for <span className="font-semibold text-[#f9fafa]">{count}</span> eligible
-            {count === 1 ? ' rule' : ' rules'}
-            {srcZone && dstZone ? (
-              <> in zone pair <span className="font-semibold text-[#f9fafa]">{srcZone}</span> → <span className="font-semibold text-[#f9fafa]">{dstZone}</span></>
-            ) : (
-              <> across <span className="font-semibold text-amber-400">all policies</span></>
+        {!isRunning ? (
+          <>
+            <div className="text-sm text-[#cbced2] space-y-2 mb-4">
+              {count >= 10 && (
+                <p className="text-sm text-[#cbced2]">
+                  {count >= 50
+                    ? 'The UniFi Network API processes each rule individually. Large batches may take several minutes.'
+                    : 'The UniFi Network API processes each rule individually. This may take up to a minute.'}
+                </p>
+              )}
+              <p className="text-sm text-[#cbced2]">
+                Changes are applied immediately on the UniFi Gateway but may take up to 5 minutes to reflect in the Log Stream.
+              </p>
+              {action === 'disable' && !srcZone && (
+                <div className="px-3 py-2 rounded border border-[#f0383b]/40 bg-[#f0383b]/10 text-[#f0383b] text-xs">
+                  Disabling syslog on all policies will prevent firewall logs from being received. No new log entries will appear until logging is re-enabled.
+                </div>
+              )}
+              {action === 'disable' && srcZone && (
+                <p className="text-sm text-[#676f79]">
+                  Firewall events for this zone pair will no longer be logged.
+                </p>
+              )}
+              {action === 'enable' && count > 50 && (
+                <div className="px-3 py-2 rounded border border-[#f0383b]/40 bg-[#f0383b]/10 text-[#f0383b] text-xs">
+                  Only enable logging on policies that add value. Performance of both the UniFi Controller and this app may be impacted when more than 200 policies have logging enabled.
+                </div>
+              )}
+              <p>
+                {verb} logging for <span className="font-semibold text-[#f9fafa]">{count}</span> eligible
+                {count === 1 ? ' rule' : ' rules'}
+                {srcZone && dstZone ? (
+                  <> in zone pair <span className="font-semibold text-[#f9fafa]">{srcZone}</span> → <span className="font-semibold text-[#f9fafa]">{dstZone}</span>?</>
+                ) : (
+                  <> across <span className="font-semibold text-[#f9fafa]">All Policies</span>?</>
+                )}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-2">
+              <button
+                onClick={onCancel}
+                className="px-3.5 py-1.5 rounded text-[12px] font-medium text-[#cbced2] hover:text-[#f9fafa] border border-white/[0.07] hover:border-white/[0.15] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                className={`px-3.5 py-1.5 rounded text-[12px] font-medium text-white transition-colors ${
+                  action === 'enable'
+                    ? 'bg-teal-600 hover:bg-teal-500'
+                    : 'bg-red-600 hover:bg-red-500'
+                }`}
+              >
+                {verb} Logging
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <div className="flex items-center justify-between text-[11px] text-[#cbced2] mb-1.5">
+                <span>
+                  {progress.phase === 'verifying' ? 'Verifying changes...' : (
+                    <>{progress.completed} <span className="text-[#676f79]">of</span> {progress.total} rules</>
+                  )}
+                </span>
+                <span className="text-[#676f79]">{pct}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-white/[0.07] rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    action === 'enable' ? 'bg-teal-500' : 'bg-red-500'
+                  }`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+            {progress.failed > 0 && (
+              <div className="text-[11px] text-[#f36267]">{progress.failed} failed</div>
             )}
-          </p>
-          <p className="text-[11px] text-[#676f79]">
-            Changes are applied immediately on the UniFi Gateway, but may take up to 5 minutes to take effect and reflect in the Log Stream.
-          </p>
-        </div>
-
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3.5 py-1.5 rounded text-[12px] font-medium text-[#cbced2] hover:text-[#f9fafa] border border-white/[0.07] hover:border-white/[0.15] transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className={`px-3.5 py-1.5 rounded text-[12px] font-medium text-white transition-colors ${
-              action === 'enable'
-                ? 'bg-teal-600 hover:bg-teal-500'
-                : 'bg-red-600 hover:bg-red-500'
-            }`}
-          >
-            {verb} Logging
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -615,6 +667,7 @@ export default function FirewallRules() {
   const [toggling, setToggling] = useState(false)
   const [bulkAction, setBulkAction] = useState(null)
   const [pendingBulk, setPendingBulk] = useState(null) // { enableAll, eligible }
+  const [bulkProgress, setBulkProgress] = useState(null) // { completed, total, success, failed, phase, eta }
   const [selectedCell, setSelectedCell] = useState(null)
   const [filters, setFilters] = useState({
     ipv4: true, ipv6: true, builtIn: true, custom: true, inUse: true, paused: true,
@@ -720,6 +773,17 @@ export default function FirewallRules() {
     }
   }, [data])
 
+  const { allEnabled, allDisabled } = useMemo(() => {
+    const controllable = filteredPolicies.filter(p =>
+      p.metadata?.origin !== 'DERIVED' && p.enabled !== false
+    )
+    if (!controllable.length) return { allEnabled: true, allDisabled: true }
+    return {
+      allEnabled: controllable.every(p => p.loggingEnabled),
+      allDisabled: controllable.every(p => !p.loggingEnabled),
+    }
+  }, [filteredPolicies])
+
   async function handleToggle(policyId, loggingEnabled, origin) {
     setToggling(true)
     try {
@@ -738,6 +802,19 @@ export default function FirewallRules() {
     }
   }
 
+  function makeProgressCallback() {
+    return (prog) => setBulkProgress(prog)
+  }
+
+  function handleBulkResult(result) {
+    if (result?.failed > 0) {
+      const msg = result.retried
+        ? `${result.success} updated, ${result.failed} failed (${result.retried} retried)`
+        : `${result.success} updated, ${result.failed} failed`
+      setError(msg)
+    }
+  }
+
   async function handleGroupToggle(group, enableAll) {
     const eligible = group.policies.filter(p =>
       p.metadata?.origin !== 'DERIVED' &&
@@ -748,27 +825,14 @@ export default function FirewallRules() {
 
     setToggling(true)
     try {
-      const result = await bulkUpdateFirewallLogging(
-        eligible.map(p => ({ id: p.id, loggingEnabled: enableAll }))
-      )
-      if (result.failed > 0) {
-        // Partial failure — re-fetch to avoid state drift
-        await loadPolicies()
-        setError(`${result.success} updated, ${result.failed} failed`)
-        setTimeout(() => setError(null), 5000)
-      } else {
-        // All succeeded — optimistic local update (no reload flicker)
-        const eligibleIds = new Set(eligible.map(e => e.id))
-        setData(prev => ({
-          ...prev,
-          policies: prev.policies.map(p =>
-            eligibleIds.has(p.id) ? { ...p, loggingEnabled: enableAll } : p
-          ),
-        }))
-      }
+      const policies = eligible.map(p => ({ id: p.id, loggingEnabled: enableAll }))
+      const result = await bulkUpdateFirewallLoggingStream(policies, makeProgressCallback())
+      setBulkProgress(null)
+      await loadPolicies()
+      handleBulkResult(result)
     } catch (err) {
+      setBulkProgress(null)
       setError(err.message)
-      setTimeout(() => setError(null), 5000)
     } finally {
       setToggling(false)
     }
@@ -787,19 +851,19 @@ export default function FirewallRules() {
   async function confirmBulkAction() {
     if (!pendingBulk) return
     const { enableAll, eligible } = pendingBulk
-    setPendingBulk(null)
 
     setBulkAction(enableAll ? 'enable' : 'disable')
+    setBulkProgress({ completed: 0, total: eligible.length, success: 0, failed: 0, phase: 'patching' })
     try {
-      const result = await bulkUpdateFirewallLogging(
-        eligible.map(p => ({ id: p.id, loggingEnabled: enableAll }))
-      )
+      const policies = eligible.map(p => ({ id: p.id, loggingEnabled: enableAll }))
+      const result = await bulkUpdateFirewallLoggingStream(policies, makeProgressCallback())
+      setBulkProgress(null)
+      setPendingBulk(null)
       await loadPolicies()
-      if (result.failed > 0) {
-        setError(`${result.success} updated, ${result.failed} failed`)
-        setTimeout(() => setError(null), 5000)
-      }
+      handleBulkResult(result)
     } catch (err) {
+      setBulkProgress(null)
+      setPendingBulk(null)
       setError(err.message)
     } finally {
       setBulkAction(null)
@@ -827,15 +891,16 @@ export default function FirewallRules() {
 
   return (
     <div>
-      {/* Bulk confirm modal */}
-      {pendingBulk && (
+      {/* Bulk confirm modal (also shows progress when running) */}
+      {(pendingBulk || bulkProgress) && (
         <BulkConfirmModal
-          action={pendingBulk.enableAll ? 'enable' : 'disable'}
-          count={pendingBulk.eligible.length}
+          action={bulkAction || (pendingBulk?.enableAll ? 'enable' : 'disable')}
+          count={pendingBulk?.eligible.length ?? bulkProgress?.total ?? 0}
           srcZone={selectedCell ? zoneMap[selectedCell.srcZoneId] : null}
           dstZone={selectedCell ? zoneMap[selectedCell.dstZoneId] : null}
           onConfirm={confirmBulkAction}
           onCancel={() => setPendingBulk(null)}
+          progress={bulkProgress}
         />
       )}
 
@@ -865,6 +930,8 @@ export default function FirewallRules() {
         onBulk={handleBulkAction}
         bulkAction={bulkAction}
         zoneScopeLabel={selectedCell ? `${zoneMap[selectedCell.srcZoneId]} → ${zoneMap[selectedCell.dstZoneId]}` : null}
+        allEnabled={allEnabled}
+        allDisabled={allDisabled}
       />
 
       {/* Policy table */}
