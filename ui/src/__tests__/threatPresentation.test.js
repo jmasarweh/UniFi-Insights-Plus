@@ -16,6 +16,8 @@ describe('THREAT_LEVELS', () => {
       expect(tier).toHaveProperty('label')
       expect(tier).toHaveProperty('color')
       expect(tier).toHaveProperty('dot')
+      expect(tier).toHaveProperty('hex')
+      expect(tier.hex).toMatch(/^#[0-9a-f]{6}$/)
     }
   })
 })
