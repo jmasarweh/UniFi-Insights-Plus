@@ -13,7 +13,7 @@ services:
     # If you add real credentials here, do not commit this file, and 
     # instead use .env file instead for credentials/passords
     #env_file:
-    #-.env
+    #- .env
     environment:
       POSTGRES_PASSWORD: "your_strong_password_here"
       ABUSEIPDB_API_KEY: "your_key_here"
