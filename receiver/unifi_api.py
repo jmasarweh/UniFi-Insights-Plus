@@ -10,6 +10,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import requests
@@ -818,48 +819,123 @@ class UniFiAPI:
             {'loggingEnabled': logging_enabled}
         )
 
-    def bulk_patch_logging(self, updates: list[dict]) -> dict:
+    def _patch_one_policy(self, policy_id: str, logging_val: bool) -> dict:
+        """Patch a single policy with retry. Returns result dict (thread-safe)."""
+        max_retries = 3
+        retried = 0
+        for attempt in range(max_retries):
+            try:
+                self.patch_firewall_policy(policy_id, logging_val)
+                return {'status': 'success', 'retried': retried}
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if status in (429, 502, 503, 504) and attempt < max_retries - 1:
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning("Bulk patch: policy %s got HTTP %d, retrying in %.1fs (attempt %d/%d)",
+                                   policy_id, status, delay, attempt + 1, max_retries)
+                    time.sleep(delay)
+                    retried += 1
+                    continue
+                err_text = e.response.text[:200] if e.response is not None else str(e)
+                logger.warning("Bulk patch: policy %s failed (HTTP %d): %.200s", policy_id, status, err_text)
+                return {'status': 'failed', 'id': policy_id, 'error': f'HTTP {status}: {err_text}', 'retried': retried}
+            except Exception as e:
+                logger.warning("Bulk patch: policy %s failed: %s", policy_id, e)
+                return {'status': 'failed', 'id': policy_id, 'error': str(e), 'retried': retried}
+        return {'status': 'failed', 'id': policy_id, 'error': 'max retries exceeded', 'retried': retried}  # defensive fallback
+
+    def bulk_patch_logging(self, updates: list[dict], progress_callback=None) -> dict:
         """Batch-update loggingEnabled for multiple policies.
 
         updates: [{"id": "uuid", "loggingEnabled": bool}, ...]
-        Returns summary: {total, success, failed, skipped, errors}
+        progress_callback: optional callable(completed, total, success, failed)
+            called after each policy finishes patching.
+        Returns summary: {total, success, failed, skipped, retried, errors}
+
+        Uses 4 concurrent workers with retry + exponential backoff.
+        After patching, verifies actual state matches requested state.
         """
         total = len(updates)
         success = 0
         failed = 0
         skipped = 0
+        retried = 0
         errors = []
 
+        # Filter out items with no loggingEnabled value
+        work_items = []
         for item in updates:
-            policy_id = item.get('id', '')
-            logging_val = item.get('loggingEnabled')
-
-            if logging_val is None:
+            if item.get('loggingEnabled') is None:
                 skipped += 1
-                continue
+            else:
+                work_items.append(item)
 
+        work_total = len(work_items)
+
+        # Ensure session is initialized before spawning threads (avoids lazy-init race)
+        self._get_session()
+
+        # Patch concurrently (4 workers keeps controller happy)
+        successful_ids = set()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {
+                pool.submit(self._patch_one_policy, item['id'], item['loggingEnabled']): item
+                for item in work_items
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                item = futures[future]
+                retried += result.get('retried', 0)
+                if result['status'] == 'success':
+                    success += 1
+                    successful_ids.add(item['id'])
+                else:
+                    failed += 1
+                    errors.append({'id': result['id'], 'error': result['error']})
+                if progress_callback:
+                    try:
+                        progress_callback(success + failed, work_total, success, failed, phase='patching')
+                    except Exception:
+                        logger.debug("progress_callback failed during patching", exc_info=True)
+
+        # Verification pass: only verify policies that succeeded during patching
+        mismatched = []
+        if successful_ids:
+            if progress_callback:
+                try:
+                    progress_callback(work_total, work_total, success, failed, phase='verifying')
+                except Exception:
+                    logger.debug("progress_callback failed during verification", exc_info=True)
             try:
-                self.patch_firewall_policy(policy_id, logging_val)
-                success += 1
-            except requests.HTTPError as e:
-                failed += 1
-                errors.append({
-                    'id': policy_id,
-                    'error': f'HTTP {e.response.status_code}: {e.response.text[:200]}'
-                })
+                actual_policies = self.get_firewall_policies()
+                actual_map = {p['id']: p.get('loggingEnabled', False) for p in actual_policies}
+                for item in work_items:
+                    pid = item['id']
+                    if pid in successful_ids and actual_map.get(pid) != item['loggingEnabled']:
+                        mismatched.append(pid)
+                if mismatched:
+                    logger.warning("Bulk patch: %d/%d policies did not reflect requested state after patching",
+                                   len(mismatched), success)
+                    failed += len(mismatched)
+                    success = max(0, success - len(mismatched))
+                    errors.append({
+                        'verification': f'{len(mismatched)} policies did not reflect the requested state',
+                        'ids': mismatched[:20],
+                    })
             except Exception as e:
-                failed += 1
-                errors.append({'id': policy_id, 'error': str(e)})
+                logger.warning("Bulk patch: verification failed: %s", e)
+                errors.append({'verification': f'Could not verify: {e}'})
 
-            # Be controller-friendly: 100ms delay between requests
-            time.sleep(0.1)
+        logger.info("Bulk patch complete: %d total, %d success, %d failed, %d skipped, %d retried, %d mismatched",
+                     total, success, failed, skipped, retried, len(mismatched))
 
         return {
             'total': total,
             'success': success,
             'failed': failed,
             'skipped': skipped,
-            'errors': errors[:20],  # Cap error details
+            'retried': retried,
+            'errors': errors[:20],
         }
 
     # ── Phase 2: Client/Device Polling ───────────────────────────────────────
