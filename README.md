@@ -1,4 +1,6 @@
-# 🔍 UniFi Log Insight
+# UniFi Log Insight
+
+<img width="425" height="437" alt="icon-512x512" src="https://github.com/user-attachments/assets/746ad8b9-9f45-4daf-9846-7b26ce4f12d4" />
 
 
 
