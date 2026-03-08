@@ -8,7 +8,7 @@ export const THREAT_COLORS = {
 };
 
 export function getThreatLevel(score) {
-  if (score === 0 || score === null || score === undefined) return 'none';
+  if (score === null || score === undefined || score <= 0) return 'none';
   if (score < 25) return 'low';
   if (score < 50) return 'medium';
   if (score < 75) return 'high';

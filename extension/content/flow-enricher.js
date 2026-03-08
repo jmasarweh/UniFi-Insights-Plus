@@ -16,12 +16,12 @@
  * - Columns are user-configurable: discover positions from header text
  */
 
-window.addEventListener('uli-ready', function () {
+window.addEventListener('uli-ready', async function () {
   const config = window.__uliConfig;
   if (!config || !config.enableFlowEnrichment) return;
 
   const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/;
-  const IPV6_RE = /(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,6}:|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}/;
+  const IPV6_TOKEN_RE = /[0-9a-fA-F:.]+/g;
 
   const ABUSE_CATEGORIES = {
     1: 'DNS Compromise', 2: 'DNS Poisoning', 3: 'Fraud Orders', 4: 'DDoS Attack',
@@ -32,16 +32,90 @@ window.addEventListener('uli-ready', function () {
     21: 'Web App Attack', 22: 'SSH', 23: 'IoT Targeted',
   };
 
-  const THREAT_COLORS = {
-    none:     { bg: '#34d39922', text: '#34d399', border: '#34d39944' },
-    low:      { bg: '#60a5fa22', text: '#60a5fa', border: '#60a5fa44' },
-    medium:   { bg: '#fbbf2422', text: '#fbbf24', border: '#fbbf2444' },
-    high:     { bg: '#fb923c22', text: '#fb923c', border: '#fb923c44' },
-    critical: { bg: '#f8717122', text: '#f87171', border: '#f8717144' },
-  };
+  let threatColors = null;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'GET_THREAT_COLORS' });
+    if (resp && resp.ok && resp.data) {
+      threatColors = resp.data;
+    }
+  } catch {
+    // Ignore; we'll use a safe fallback color set.
+  }
+  if (!threatColors) {
+    threatColors = {
+      none: { bg: '#34d39922', text: '#34d399', border: '#34d39944' },
+      low: { bg: '#60a5fa22', text: '#60a5fa', border: '#60a5fa44' },
+      medium: { bg: '#fbbf2422', text: '#fbbf24', border: '#fbbf2444' },
+      high: { bg: '#fb923c22', text: '#fb923c', border: '#fb923c44' },
+      critical: { bg: '#f8717122', text: '#f87171', border: '#f8717144' },
+    };
+  }
 
   let debounceTimer = null;
   let processing = false;
+  let tableObserver = null;
+  let remountObserver = null;
+  let startupObserver = null;
+  let themeObserver = null;
+  let observedWrapper = null;
+  let lastKnownTheme = detectTheme();
+
+  function teardownObservers() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (tableObserver) {
+      tableObserver.disconnect();
+      tableObserver = null;
+    }
+    if (remountObserver) {
+      remountObserver.disconnect();
+      remountObserver = null;
+    }
+    if (startupObserver) {
+      startupObserver.disconnect();
+      startupObserver = null;
+    }
+    if (themeObserver) {
+      themeObserver.disconnect();
+      themeObserver = null;
+    }
+    observedWrapper = null;
+  }
+  window.addEventListener('pagehide', teardownObservers, { once: true });
+
+  // Watch for UniFi theme changes — strip badges and re-enrich so blacklist
+  // colors and IP text colors update without requiring a page refresh.
+  (function watchTheme() {
+    let themeDebounce = null;
+    themeObserver = new MutationObserver(() => {
+      if (themeDebounce) clearTimeout(themeDebounce);
+      themeDebounce = setTimeout(() => {
+        const current = detectTheme();
+        if (current !== lastKnownTheme) {
+          lastKnownTheme = current;
+          stripBadges();
+          enrichFlowTable();
+        }
+      }, 250);
+    });
+    themeObserver.observe(document.body, { childList: true, subtree: true });
+  })();
+
+  /** Remove all injected badges and reset IP text colors. */
+  function stripBadges() {
+    for (const badge of document.querySelectorAll('[data-uli-badge]')) {
+      badge.remove();
+    }
+    // Reset any colored IP text
+    const table = document.querySelector('.FLOWS_TABLE_WRAPPER_CLASSNAME table');
+    if (table) {
+      for (const p of table.querySelectorAll('p[style*="color"]')) {
+        p.style.removeProperty('color');
+      }
+    }
+  }
 
   // The flow table may not exist yet (user might be on a different sub-page).
   // Watch for it to appear.
@@ -55,37 +129,45 @@ window.addEventListener('uli-ready', function () {
       return;
     }
 
-    // Table not present — watch for SPA navigation to flow view
-    const bodyObs = new MutationObserver(() => {
+    if (startupObserver) return;
+
+    // Table not present — watch for SPA navigation to flow view.
+    startupObserver = new MutationObserver(() => {
       const w = document.querySelector('.FLOWS_TABLE_WRAPPER_CLASSNAME');
       if (w) {
-        bodyObs.disconnect();
+        startupObserver.disconnect();
+        startupObserver = null;
         observeTable(w);
         enrichFlowTable();
       }
     });
-    bodyObs.observe(document.body, { childList: true, subtree: true });
+    startupObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   function observeTable(wrapper) {
+    if (observedWrapper === wrapper && tableObserver) return;
+    observedWrapper = wrapper;
+
+    if (tableObserver) tableObserver.disconnect();
+
     // Watch for content changes (pagination, sorting, filtering)
-    const observer = new MutationObserver(() => {
+    tableObserver = new MutationObserver(() => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => enrichFlowTable(), 500);
     });
-    observer.observe(wrapper, { childList: true, subtree: true });
+    tableObserver.observe(wrapper, { childList: true, subtree: true });
 
-    // Watch for table re-mount (SPA navigation away and back)
-    const bodyObs = new MutationObserver(() => {
+    if (remountObserver) return;
+
+    // Watch for table re-mount (SPA navigation away and back).
+    remountObserver = new MutationObserver(() => {
       const w = document.querySelector('.FLOWS_TABLE_WRAPPER_CLASSNAME');
-      if (w && !w._uliObserving) {
-        w._uliObserving = true;
-        observer.observe(w, { childList: true, subtree: true });
+      if (w && w !== observedWrapper) {
+        observeTable(w);
         enrichFlowTable();
       }
     });
-    bodyObs.observe(document.body, { childList: true, subtree: true });
-    wrapper._uliObserving = true;
+    remountObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   /**
@@ -195,10 +277,33 @@ window.addEventListener('uli-ready', function () {
     const textEl = cell.querySelector('p');
     if (!textEl) return null;
     const text = textEl.textContent.trim();
+    const v6 = extractIPv6(text);
+    if (v6) return v6;
     const v4 = text.match(IPV4_RE);
-    if (v4) return v4[0];
-    const v6 = text.match(IPV6_RE);
-    return v6 ? v6[0] : null;
+    return v4 ? v4[0] : null;
+  }
+
+  function extractIPv6(text) {
+    const tokens = text.match(IPV6_TOKEN_RE);
+    if (!tokens) return null;
+    const candidates = tokens
+      .map(t => t.trim())
+      .filter(t => t.includes(':') && t.length >= 2)
+      .sort((a, b) => b.length - a.length);
+    for (const candidate of candidates) {
+      if (isValidIPv6(candidate)) return candidate.toLowerCase();
+    }
+    return null;
+  }
+
+  function isValidIPv6(candidate) {
+    try {
+      // URL parser validates IPv6 literals including compressed and mapped forms.
+      new URL(`http://[${candidate}]/`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -225,24 +330,50 @@ window.addEventListener('uli-ready', function () {
       }
     }
 
+    // Color the IP text based on threat score (ThreatMap legend scale)
+    if (textEl && threat.threat_score != null) {
+      const ipColor = scoreToTextColor(threat.threat_score);
+      if (ipColor) textEl.style.color = ipColor;
+    }
+
     const badge = document.createElement('span');
     badge.setAttribute('data-uli-badge', ip);
     badge.style.flexShrink = '0';
 
     const shadow = badge.attachShadow({ mode: 'closed' });
     const level = getThreatLevel(threat.threat_score);
-    const colors = THREAT_COLORS[level];
+    const colors = threatColors[level] || threatColors.none;
 
     const parts = [];
     const hasScore = threat.threat_score !== null && threat.threat_score !== undefined;
 
-    if (hasScore) {
+    const isBlacklisted = threat.threat_categories && threat.threat_categories.includes('blacklist');
+    const isDark = detectTheme() === 'dark';
+
+    if (isBlacklisted) {
+      // Blacklist badge replaces the score pill entirely
+      // Dark mode: white badge, black text. Light mode: black badge, white text.
+      const blBg = isDark ? '#fff' : '#000';
+      const blText = isDark ? '#000' : '#fff';
+      const tooltipLines = ['Blacklisted'];
+      if (hasScore) tooltipLines.push('Threat Score: ' + threat.threat_score);
+      if (threat.threat_categories.length > 1) {
+        const decoded = threat.threat_categories
+          .filter(c => c !== 'blacklist')
+          .map(c => ABUSE_CATEGORIES[parseInt(c)] || ('Category ' + c));
+        if (decoded.length) tooltipLines.push(decoded.join(', '));
+      }
+      parts.push(
+        '<span class="pill blacklist" style="background:' + blBg +
+        ';color:' + blText +
+        '" title="' + escapeAttr(tooltipLines.join('\n')) + '">Blacklist</span>'
+      );
+    } else if (hasScore) {
       // Threat score pill with category tooltip
       const score = threat.threat_score;
       const tooltipLines = ['Threat Score: ' + score];
       if (threat.threat_categories && threat.threat_categories.length) {
         const decoded = threat.threat_categories.map(c => {
-          if (c === 'blacklist') return 'Blacklist';
           return ABUSE_CATEGORIES[parseInt(c)] || ('Category ' + c);
         });
         tooltipLines.push(decoded.join(', '));
@@ -253,11 +384,6 @@ window.addEventListener('uli-ready', function () {
         ';border:1px solid ' + colors.border +
         '" title="' + escapeAttr(tooltipLines.join('\n')) + '">' + score + '</span>'
       );
-
-      // Show "Blacklist" label inline when the IP is blacklisted
-      if (threat.threat_categories && threat.threat_categories.includes('blacklist')) {
-        parts.push('<span class="tag" style="color:' + colors.text + ';border-color:' + colors.border + '">Blacklist</span>');
-      }
     } else {
       // No threat score — show a green filled circle
       parts.push(
@@ -279,14 +405,14 @@ window.addEventListener('uli-ready', function () {
 
     shadow.innerHTML =
       '<style>' +
-      ':host{display:inline-flex;align-items:center;gap:3px;' +
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:10px;line-height:1}' +
-      '.pill{padding:1px 5px;border-radius:9999px;font-size:10px;font-weight:600;' +
+      ':host{display:inline-flex;align-items:center;gap:4px;' +
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;line-height:1}' +
+      '.pill{padding:2px 6px;border-radius:9999px;font-size:11px;font-weight:600;' +
       'cursor:pointer;white-space:nowrap;flex-shrink:0}' +
       '.pill:hover{filter:brightness(1.3)}' +
-      '.dot{width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0}' +
-      '.tag{padding:1px 4px;border-radius:4px;font-size:9px;font-weight:600;border:1px solid;white-space:nowrap;flex-shrink:0}' +
-      '.meta{color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px}' +
+      '.pill.blacklist{font-size:10px;border-radius:4px;padding:2px 7px;line-height:normal;display:inline-flex;align-items:center}' +
+      '.dot{width:9px;height:9px;border-radius:50%;background:#34d399;flex-shrink:0}' +
+      '.meta{color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px}' +
       '.asn{color:#6b7280}' +
       '</style>' +
       parts.join('');
@@ -319,6 +445,9 @@ window.addEventListener('uli-ready', function () {
       const lower = ip.toLowerCase();
       if (lower === '::1' || lower.startsWith('fe80:') ||
           /^f[cd][0-9a-f]{2}:/.test(lower) ||
+          lower.startsWith('ff') ||
+          lower.startsWith('2001:db8:') || lower === '2001:db8::' ||
+          lower.startsWith('2001:2:0:') || lower === '2001:2::' ||
           lower === '::') return true;
       // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check embedded IPv4
       const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
@@ -326,7 +455,7 @@ window.addEventListener('uli-ready', function () {
       return false;
     }
     // IPv4 private ranges
-    if (ip.startsWith('10.') || ip.startsWith('192.168.') ||
+    if (ip.startsWith('0.') || ip.startsWith('10.') || ip.startsWith('192.168.') ||
         ip.startsWith('127.') || ip.startsWith('169.254.') ||
         ip.startsWith('100.64.')) return true;
     const m = ip.match(/^172\.(\d+)\./);
@@ -334,12 +463,14 @@ window.addEventListener('uli-ready', function () {
       const oct = parseInt(m[1], 10);
       if (oct >= 16 && oct <= 31) return true;
     }
+    const firstOct = parseInt(ip.split('.')[0], 10);
+    if (!Number.isNaN(firstOct) && firstOct >= 224) return true;
     if (ip === '0.0.0.0' || ip === '255.255.255.255') return true;
     return false;
   }
 
   function getThreatLevel(score) {
-    if (score === 0 || score === null || score === undefined) return 'none';
+    if (score === null || score === undefined || score <= 0) return 'none';
     if (score < 25) return 'low';
     if (score < 50) return 'medium';
     if (score < 75) return 'high';
@@ -355,5 +486,27 @@ window.addEventListener('uli-ready', function () {
   function escapeAttr(str) {
     return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
               .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /** Detect UniFi theme from header background color. */
+  function detectTheme() {
+    const header = document.querySelector('header[class*="unifi-portal"]');
+    if (!header) return 'dark';
+    const bg = getComputedStyle(header).backgroundColor;
+    const m = bg.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (!m) return 'dark';
+    return (0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3]) < 128 ? 'dark' : 'light';
+  }
+
+  /**
+   * Map threat score to the IP text color using the ThreatMap legend scale.
+   * <50 blue, 50-70 amber, 70-85 red, 85+ dark red.
+   */
+  function scoreToTextColor(score) {
+    if (score === null || score === undefined || score <= 0) return null;
+    if (score < 50) return '#3b82f6';   // blue-500
+    if (score < 70) return '#f59e0b';   // amber-500
+    if (score < 85) return '#ef4444';   // red-500
+    return '#991b1b';                    // red-900
   }
 });

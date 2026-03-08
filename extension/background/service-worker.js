@@ -1,9 +1,12 @@
-import { DEFAULT_BASE_URL } from '../lib/constants.js';
+import '../lib/url-utils.js';
+import { DEFAULT_BASE_URL, THREAT_COLORS } from '../lib/constants.js';
 import { getSettings, saveSettings, setCache } from '../lib/storage.js';
 import { checkHealth, fetchUniFiSettings, batchThreatLookup, setBaseUrl, getBaseUrl } from '../lib/api-client.js';
 
 const SW_LOG_PREFIX = '[ULI][SW]';
 const PERMISSION_RETRY_DELAYS_MS = [0, 150, 350, 800, 1200];
+// Loaded by `import '../lib/url-utils.js'` above — always available.
+const toOriginPattern = globalThis.ULI_URL_UTILS.toOriginPattern;
 
 function swLog(...args) {
   console.log(SW_LOG_PREFIX, ...args);
@@ -79,7 +82,7 @@ async function discover() {
     // Not found — popup will prompt user
     setBadge('?', '#fbbf24');
   } catch (err) {
-    console.error('Discovery failed:', err);
+    swError('Discovery failed:', err);
     setBadge('!', '#f87171');
   }
 }
@@ -190,21 +193,6 @@ async function registerContentScripts(controllerUrl, options = {}) {
   }
   swLog('registerContentScripts complete', { source, origin, tabCount, injectedTabs });
   return { ok: true, origin, tabCount, injectedTabs };
-}
-
-/**
- * Convert a URL to an origin match pattern.
- * e.g., "https://192.168.1.1:443" -> "https://192.168.1.1/*"
- */
-function toOriginPattern(url) {
-  try {
-    const u = new URL(url);
-    // Include port in pattern if non-default
-    const hostPort = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-    return `${u.protocol}//${hostPort}/*`;
-  } catch {
-    return null;
-  }
 }
 
 // ── Permission Granted Fallback (Firefox popup closes during permission dialog) ─
@@ -329,6 +317,10 @@ async function handleMessage(msg) {
 
     case 'GET_BASE_URL': {
       return { ok: true, url: getBaseUrl() };
+    }
+
+    case 'GET_THREAT_COLORS': {
+      return { ok: true, data: THREAT_COLORS };
     }
 
     case 'DEBUG': {

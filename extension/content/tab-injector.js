@@ -8,7 +8,20 @@
 
 window.addEventListener('uli-ready', async function () {
   const config = window.__uliConfig;
-  if (!config || !config.enableTabInjection) return;
+  if (!config) return;
+
+  const onRuntimeMessage = (msg, _sender, sendResponse) => {
+    if (!msg || msg.type !== 'ULI_GET_THEME') return;
+    sendResponse({ ok: true, theme: detectUniFiTheme() });
+    return true;
+  };
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
+  window.addEventListener('pagehide', () => {
+    chrome.runtime.onMessage.removeListener(onRuntimeMessage);
+  }, { once: true });
+  chrome.storage.local.set({ unifiUiTheme: detectUniFiTheme() }).catch(() => {});
+
+  if (!config.enableTabInjection) return;
 
   const logInsightUrl = config.baseUrl;
   if (!logInsightUrl) return;
@@ -20,13 +33,24 @@ window.addEventListener('uli-ready', async function () {
     console.error('Invalid Log Insight URL:', logInsightUrl, e);
     return;
   }
-  const iconUrl = chrome.runtime.getURL('icons/icon-32.png');
+  const iconUrlGreyLight = chrome.runtime.getURL('icons/icon-32-grey.png');
+  const iconUrlGreyDark = chrome.runtime.getURL('icons/icon-32-grey-dark.png');
+  const iconUrlBlue = chrome.runtime.getURL('icons/icon-32-blue.png');
+
+  /** Return the correct inactive icon URL for the current theme. */
+  function inactiveIconUrl() {
+    return lastTheme === 'dark' ? iconUrlGreyDark : iconUrlGreyLight;
+  }
 
   let isActive = false;
   let iframeContainer = null;
   let iframe = null;
-  let mainContent = null;
   let uliTab = null;
+  let navRoot = null;        // authoritative nav container (set once at injection)
+  let capturedActiveTab = null; // the UniFi tab that was active when we activated
+  let themeObs = null;
+  let lastUrl = location.href;
+  let lastTheme = detectUniFiTheme();
 
   // Wait for the tab container to render
   const tabContainer = await waitForTabContainer(15000);
@@ -36,7 +60,8 @@ window.addEventListener('uli-ready', async function () {
 
   // Re-inject if SPA re-renders the header
   const headerObs = new MutationObserver(() => {
-    const container = findTabContainer();
+    // Use navRoot if still connected, else fall back to fresh query
+    const container = (navRoot && navRoot.isConnected) ? navRoot : findTabContainer();
     if (container && !container.querySelector('[data-uli-tab]')) {
       injectTab(container);
     }
@@ -44,7 +69,43 @@ window.addEventListener('uli-ready', async function () {
   headerObs.observe(document.body, { childList: true, subtree: true });
 
   // Watch for UniFi theme changes and re-sync tab styling + iframe theme
-  observeThemeChanges();
+  themeObs = observeThemeChanges(lastTheme);
+
+  // Route-change safety net: if URL changes while embed is active, force deactivate.
+  // Covers pushState, replaceState, popstate, and hashchange.
+  const origPushState = history.pushState;
+  const origReplaceState = history.replaceState;
+  history.pushState = function () {
+    origPushState.apply(this, arguments);
+    onPossibleRouteChange();
+  };
+  history.replaceState = function () {
+    origReplaceState.apply(this, arguments);
+    onPossibleRouteChange();
+  };
+  window.addEventListener('popstate', onPossibleRouteChange);
+  window.addEventListener('hashchange', onPossibleRouteChange);
+
+  function onPossibleRouteChange() {
+    if (!isActive) { lastUrl = location.href; return; }
+    if (location.href !== lastUrl) {
+      deactivateEmbed();
+    }
+    lastUrl = location.href;
+  }
+
+  const teardown = () => {
+    headerObs.disconnect();
+    if (themeObs) {
+      themeObs.disconnect();
+      themeObs = null;
+    }
+    history.pushState = origPushState;
+    history.replaceState = origReplaceState;
+    window.removeEventListener('popstate', onPossibleRouteChange);
+    window.removeEventListener('hashchange', onPossibleRouteChange);
+  };
+  window.addEventListener('pagehide', teardown, { once: true });
 
   function waitForTabContainer(timeout) {
     return new Promise((resolve) => {
@@ -78,22 +139,54 @@ window.addEventListener('uli-ready', async function () {
     for (const link of links) {
       const text = link.textContent.trim();
       if (!text) continue;
-      if (!location.href.includes(link.href)) return link;
+      if (link.hasAttribute('data-uli-tab')) continue;
+      if (!isTabActive(link)) return link;
       if (!best) best = link;
     }
     return best;
   }
 
   /**
-   * Find the currently active UniFi tab (the one matching the current URL).
+   * Find the currently active UniFi tab using explicit ARIA/class signals first,
+   * then fall back to URL matching.
    */
   function findActiveUniFiTab(container) {
     const links = container.querySelectorAll(':scope > a');
+    let urlMatch = null;
+    let fallback = null;
+
     for (const link of links) {
       if (link.hasAttribute('data-uli-tab')) continue;
-      if (link.href && location.href.includes(link.getAttribute('href'))) return link;
+      if (!fallback) fallback = link;
+
+      // Prefer explicit active signals (aria-current, aria-selected, active class)
+      if (isTabActive(link)) return link;
+
+      // URL match as secondary signal — resolve to absolute path to avoid
+      // false positives with short hrefs like "/" or "/network"
+      const hrefAttr = link.getAttribute('href') || link.href || '';
+      if (!urlMatch && hrefAttr && hrefAttr.length > 1) {
+        try {
+          const resolved = new URL(hrefAttr, location.href).pathname;
+          if (location.pathname.startsWith(resolved)) {
+            urlMatch = link;
+          }
+        } catch { /* skip malformed href */ }
+      }
     }
-    return null;
+    return urlMatch || fallback;
+  }
+
+  /**
+   * Check if a tab element has explicit active indicators from UniFi.
+   */
+  function isTabActive(link) {
+    if (link.getAttribute('aria-current') === 'page' ||
+        link.getAttribute('aria-current') === 'true') return true;
+    if (link.getAttribute('aria-selected') === 'true') return true;
+    const cls = link.className || '';
+    if (/\bactive\b/i.test(cls) || /\bselected\b/i.test(cls)) return true;
+    return false;
   }
 
   function injectTab(container) {
@@ -116,7 +209,7 @@ window.addEventListener('uli-ready', async function () {
       if (svg) svg.remove();
 
       const img = document.createElement('img');
-      img.src = iconUrl;
+      img.src = inactiveIconUrl();
       img.width = 24;
       img.height = 24;
       img.alt = 'Log Insight';
@@ -139,93 +232,110 @@ window.addEventListener('uli-ready', async function () {
     tab.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      toggleEmbed();
+      if (isActive) {
+        deactivateEmbed();
+      } else {
+        activateEmbed();
+      }
     });
 
     container.appendChild(tab);
     uliTab = tab;
+    navRoot = container; // authoritative reference — never re-query for click scope
+
+    // Attach deactivation listeners to each real UniFi tab
+    attachDeactivationListeners(container);
 
     // If we're currently active, apply active styling to the fresh tab
     if (isActive) syncTabStyling();
   }
 
-  // ── Toggle ──────────────────────────────────────────────────────────────
+  function attachDeactivationListeners(container) {
+    const links = container.querySelectorAll(':scope > a');
+    for (const link of links) {
+      if (link.hasAttribute('data-uli-tab')) continue;
+      if (link.hasAttribute('data-uli-deactivate')) continue;
+      link.setAttribute('data-uli-deactivate', 'true');
+      link.addEventListener('click', () => {
+        if (isActive) deactivateEmbed();
+      }, true);
+    }
+  }
 
-  function toggleEmbed() {
-    if (isActive) {
-      if (iframeContainer) iframeContainer.style.display = 'none';
-      if (mainContent) mainContent.style.display = '';
-      restoreTabStyling();
-      isActive = false;
-      return;
+  // ── Activate / Deactivate ────────────────────────────────────────────────
+
+  function activateEmbed() {
+    if (isActive) return;
+
+    // Capture the currently-active UniFi tab BEFORE we modify anything.
+    if (navRoot && navRoot.isConnected) {
+      capturedActiveTab = findActiveUniFiTab(navRoot);
     }
 
-    mainContent = document.querySelector('main');
-    if (!mainContent) return;
-
+    // Use fixed overlay so we never touch <main> or hold stale references
     if (!iframeContainer) {
       iframeContainer = createIframeContainer();
-      mainContent.parentElement.insertBefore(iframeContainer, mainContent.nextSibling);
+      document.body.appendChild(iframeContainer);
     }
 
-    mainContent.style.display = 'none';
     iframeContainer.style.display = 'block';
     syncTabStyling();
     isActive = true;
+    lastUrl = location.href;
+  }
+
+  function deactivateEmbed() {
+    if (!isActive) return;
+    if (iframeContainer) iframeContainer.style.display = 'none';
+    restoreTabStyling();
+    capturedActiveTab = null;
+    isActive = false;
   }
 
   // ── Tab styling ─────────────────────────────────────────────────────────
   //
-  // UniFi uses identical CSS classes for all tabs — active vs inactive is
-  // determined by internal CSS selectors (URL match), not class differences.
-  // We must override with inline styles, reading live computed values from
-  // the real active/inactive tabs.
-
-  let dimmedTab = null;
+  // UniFi drives active tab styling via aria-current="page" matched by
+  // CSS-in-JS selectors. Same CSS classes on all tabs — only the ARIA
+  // attribute differs. We manipulate aria-current directly instead of
+  // fighting CSS specificity with inline style overrides.
 
   function syncTabStyling() {
     if (!uliTab) return;
-    const container = uliTab.parentElement;
-    if (!container) return;
 
-    restoreTabStyling();
-
-    const activeTab = findActiveUniFiTab(container);
-    const inactiveTab = findInactiveTab(container);
-    if (!activeTab) return;
-
-    // Read live computed styles before changing anything
-    const activeCs = getComputedStyle(activeTab);
-    const inactiveCs = inactiveTab ? getComputedStyle(inactiveTab) : null;
-    const activeColor = activeCs.color;
-    const activeBg = activeCs.backgroundColor;
-    const inactiveColor = inactiveCs ? inactiveCs.color : null;
-    const inactiveBg = inactiveCs ? inactiveCs.backgroundColor : null;
-
-    // Make the real active tab look inactive
-    if (inactiveColor) {
-      activeTab.style.setProperty('color', inactiveColor, 'important');
-      activeTab.style.setProperty('background-color', inactiveBg, 'important');
-      dimmedTab = activeTab;
+    // Remove active indicator from the real UniFi tab
+    if (capturedActiveTab && capturedActiveTab.isConnected) {
+      capturedActiveTab.removeAttribute('aria-current');
     }
 
     // Make our tab look active
-    uliTab.style.setProperty('color', activeColor, 'important');
-    uliTab.style.setProperty('background-color', activeBg, 'important');
+    uliTab.setAttribute('aria-current', 'page');
+
+    // Swap icon to active blue
+    const img = uliTab.querySelector('img');
+    if (img) img.src = iconUrlBlue;
   }
 
   function restoreTabStyling() {
-    // Restore dimmed UniFi tab
-    if (dimmedTab && dimmedTab.isConnected) {
-      dimmedTab.style.removeProperty('color');
-      dimmedTab.style.removeProperty('background-color');
+    // Restore the real UniFi tab's active state (only if still connected —
+    // after SPA navigation React may have replaced the element)
+    if (capturedActiveTab && capturedActiveTab.isConnected) {
+      capturedActiveTab.setAttribute('aria-current', 'page');
     }
-    dimmedTab = null;
 
-    // Restore our tab
+    // Remove active state from our tab and reset icon to inactive grey
     if (uliTab && uliTab.isConnected) {
-      uliTab.style.removeProperty('color');
-      uliTab.style.removeProperty('background-color');
+      uliTab.removeAttribute('aria-current');
+      const img = uliTab.querySelector('img');
+      if (img) img.src = inactiveIconUrl();
+    }
+
+    // Safety: ensure no lingering aria-current on our tab after React re-renders
+    const freshUli = document.querySelector('[data-uli-tab]');
+    if (freshUli && freshUli !== uliTab) {
+      freshUli.removeAttribute('aria-current');
+      const img = freshUli.querySelector('img');
+      if (img) img.src = inactiveIconUrl();
+      uliTab = freshUli;
     }
   }
 
@@ -247,31 +357,27 @@ window.addEventListener('uli-ready', async function () {
     return luminance < 128;
   }
 
-  let lastTheme = detectUniFiTheme();
-
-  function observeThemeChanges() {
-    // UniFi toggles themes by re-rendering the entire React tree with new
-    // CSS-in-JS class names — no attribute changes on html/body.  We watch
-    // the header for any child/attribute mutations and re-check the computed
-    // background color to detect the switch.
+  function observeThemeChanges(initialTheme) {
+    // UniFi toggles themes by re-rendering the entire React tree — the old
+    // header element gets replaced, so we must observe document.body with
+    // subtree:true to catch the new header appearing. Debounced to 200ms
+    // to avoid excessive checks.
     let debounce = null;
+    let known = initialTheme;
     const check = () => {
       const current = detectUniFiTheme();
-      if (current !== lastTheme) {
+      if (current !== known) {
+        known = current;
         lastTheme = current;
         onThemeChanged(current);
       }
     };
-    const themeObs = new MutationObserver(() => {
+    const observer = new MutationObserver(() => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(check, 200);
     });
-    const header = document.querySelector('header[class*="unifi-portal"]');
-    if (header) {
-      themeObs.observe(header, { childList: true, subtree: true, attributes: true });
-    }
-    // Fallback: also watch body for large re-renders (SPA navigation)
-    themeObs.observe(document.body, { childList: true, subtree: false });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return observer;
   }
 
   function onThemeChanged(theme) {
@@ -290,10 +396,13 @@ window.addEventListener('uli-ready', async function () {
         }
       }
 
-      // Re-apply active inline styles if currently active
+      // Update icon for new theme and re-apply styling
       if (isActive) {
         restoreTabStyling();
         syncTabStyling();
+      } else {
+        const img = uliTab.querySelector('img');
+        if (img) img.src = inactiveIconUrl();
       }
     }
 
@@ -301,18 +410,24 @@ window.addEventListener('uli-ready', async function () {
     if (iframe && iframe.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'uli-theme', theme }, logInsightOrigin);
     }
+    chrome.storage.local.set({ unifiUiTheme: theme }).catch(() => {});
   }
 
   // ── Iframe ──────────────────────────────────────────────────────────────
 
   function createIframeContainer() {
+    // Use fixed positioning to overlay the content area.
+    // This avoids hiding/showing <main> and holding stale DOM references.
+    const header = document.querySelector('header[class*="unifi-portal"]');
+    const headerH = header ? header.getBoundingClientRect().height : 48;
+
     const container = document.createElement('div');
     container.id = 'uli-embed';
-    container.style.cssText = 'display:none;position:relative;width:100%;height:calc(100vh - 50px);overflow:hidden;';
+    container.style.cssText = `display:none;position:fixed;top:${headerH}px;left:0;right:0;bottom:0;z-index:1000;`;
 
     const theme = detectUniFiTheme();
     iframe = document.createElement('iframe');
-    iframe.src = logInsightUrl + '?theme=' + theme;
+    iframe.src = logInsightUrl + '?theme=' + theme + '&parentOrigin=' + encodeURIComponent(location.origin);
     iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups';
     iframe.style.cssText = 'width:100%;height:100%;border:none;';
 
@@ -325,20 +440,15 @@ window.addEventListener('uli-ready', async function () {
     if (e.key === 'Escape' && isActive) {
       const el = e.target || document.activeElement;
       if (el && el.matches('input, textarea, select, button, [contenteditable="true"]')) return;
-      toggleEmbed();
+      deactivateEmbed();
     }
   });
 
-  // Deactivate when user clicks another UniFi tab
-  document.addEventListener('click', (e) => {
-    if (!isActive) return;
-    const clickedTab = e.target.closest('a');
-    if (!clickedTab || clickedTab.hasAttribute('data-uli-tab')) return;
-    const container = findTabContainer();
-    if (container && container.contains(clickedTab)) {
-      toggleEmbed();
-    }
-  }, true);
+  // Deactivate when user clicks another UniFi tab.
+  // Listeners are attached directly to each tab <a> in attachDeactivationListeners()
+  // called from injectTab(). This is more reliable than a document-level handler
+  // because content script capture listeners on document can miss events in some
+  // browser/extension configurations.
 
   // Listen for navigation requests from flow-enricher (pill/dot clicks)
   window.addEventListener('uli-navigate', (e) => {
@@ -346,7 +456,7 @@ window.addEventListener('uli-ready', async function () {
     if (!ip) return;
 
     // Activate the embed if not already active
-    if (!isActive) toggleEmbed();
+    if (!isActive) activateEmbed();
 
     // Navigate the iframe to logs filtered by IP
     if (iframe && iframe.contentWindow) {

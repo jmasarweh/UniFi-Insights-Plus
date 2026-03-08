@@ -109,7 +109,23 @@ export default function App() {
 
   // Listen for messages from parent window (when embedded in UniFi iframe)
   useEffect(() => {
+    if (window.parent === window) return () => {}
+
+    const allowedOrigins = new Set()
+    const fromQuery = new URLSearchParams(window.location.search).get('parentOrigin')
+    if (fromQuery) allowedOrigins.add(fromQuery)
+    if (document.referrer) {
+      try {
+        allowedOrigins.add(new URL(document.referrer).origin)
+      } catch {
+        // Ignore malformed referrer values.
+      }
+    }
+    if (allowedOrigins.size === 0) return () => {}
+
     const handler = (e) => {
+      if (e.source !== window.parent) return
+      if (!allowedOrigins.has(e.origin)) return
       if (!e.data || !e.data.type) return
       if (e.data.type === 'uli-theme' && (e.data.theme === 'dark' || e.data.theme === 'light')) {
         setTheme(e.data.theme)

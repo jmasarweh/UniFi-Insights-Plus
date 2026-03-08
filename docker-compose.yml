@@ -1,6 +1,6 @@
 services:
   unifi-log-insight:
-    build: .
+    image: ghcr.io/jmasarweh/unifi-log-insight:latest
     pull_policy: always
     container_name: unifi-log-insight
     restart: unless-stopped
@@ -12,17 +12,17 @@ services:
       - ./maxmind:/app/maxmind
     # If you add real credentials here, do not commit this file, and 
     # instead use .env file instead for credentials/passwords
-    env_file:
-    - .env
-   # environment:
-    #  POSTGRES_PASSWORD: "your_strong_password_here"
-     # ABUSEIPDB_API_KEY: "your_key_here"
-      #MAXMIND_ACCOUNT_ID: "your_account_id"
-      #MAXMIND_LICENSE_KEY: "your_license_key"
-      #LOG_LEVEL: "INFO"
-      #TZ: "Europe/London"
-      #UNIFI_API_KEY: "your_unifi_api_key_here"
-      #UNIFI_HOST: "https://192.168.1.1"
+    #env_file:
+    #- .env
+    environment:
+      POSTGRES_PASSWORD: "your_strong_password_here"
+      ABUSEIPDB_API_KEY: "your_key_here"
+      MAXMIND_ACCOUNT_ID: "your_account_id"
+      MAXMIND_LICENSE_KEY: "your_license_key"
+      LOG_LEVEL: "INFO"
+      TZ: "Europe/London"
+      UNIFI_API_KEY: "your_unifi_api_key_here"
+      UNIFI_HOST: "https://192.168.1.1"
       # ── External Database (uncomment to use) ──
       # DB_HOST: "postgres"
       # DB_PORT: "5432"

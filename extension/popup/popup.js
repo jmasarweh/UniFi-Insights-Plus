@@ -20,6 +20,7 @@ const openLogs = document.getElementById('open-logs');
 
 const controllerStatus = document.getElementById('controller-status');
 const controllerDisplay = document.getElementById('controller-display');
+const controllerImg = document.getElementById('controller-img');
 const controllerUrl = document.getElementById('controller-url');
 const editControllerBtn = document.getElementById('edit-controller-btn');
 const controllerEdit = document.getElementById('controller-edit');
@@ -39,6 +40,8 @@ let initialTabInjection = true;
 let initialFlowEnrichment = true;
 const PERMISSION_RETRY_DELAYS_MS = [0, 120, 300, 700];
 const POPUP_LOG_PREFIX = '[ULI][Popup]';
+// Loaded by url-utils.js <script> in popup.html — always available.
+const toOriginPattern = globalThis.ULI_URL_UTILS.toOriginPattern;
 
 function popupLog(...args) {
   console.log(POPUP_LOG_PREFIX, ...args);
@@ -46,6 +49,40 @@ function popupLog(...args) {
 
 function popupWarn(...args) {
   console.warn(POPUP_LOG_PREFIX, ...args);
+}
+
+// -- Theme --
+
+function applyTheme(theme) {
+  const safeTheme = theme === 'light' ? 'light' : 'dark';
+  document.body.setAttribute('data-theme', safeTheme);
+}
+
+async function syncPopupTheme() {
+  applyTheme('dark');
+
+  try {
+    const cache = await chrome.storage.local.get('unifiUiTheme');
+    if (cache.unifiUiTheme === 'light' || cache.unifiUiTheme === 'dark') {
+      applyTheme(cache.unifiUiTheme);
+    }
+  } catch {
+    // Ignore cache read errors; theme lookup below may still work.
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs && tabs[0];
+    if (!activeTab || !activeTab.id) return;
+
+    const resp = await chrome.tabs.sendMessage(activeTab.id, { type: 'ULI_GET_THEME' });
+    if (resp && resp.ok && (resp.theme === 'light' || resp.theme === 'dark')) {
+      applyTheme(resp.theme);
+      await chrome.storage.local.set({ unifiUiTheme: resp.theme });
+    }
+  } catch {
+    // No content script on the active tab, or messaging blocked.
+  }
 }
 
 // -- Helpers --
@@ -58,16 +95,6 @@ function normalizeUrl(input, defaultProto = 'http') {
     val = `${defaultProto}://${val}`;
   }
   return val;
-}
-
-function toOriginPattern(url) {
-  try {
-    const u = new URL(url);
-    const hostPort = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-    return `${u.protocol}//${hostPort}/*`;
-  } catch {
-    return null;
-  }
 }
 
 function formatNumber(n) {
@@ -116,6 +143,7 @@ function setControllerPermissionState(hasPermission) {
 
 async function init() {
   popupLog('init start');
+  await syncPopupTheme();
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
     if (!resp || !resp.ok || !resp.data) {
@@ -222,6 +250,12 @@ async function showConnected(settings) {
   grantBanner.hidden = true;
   controllerError.hidden = true;
   controllerStatus.hidden = true;
+  controllerImg.hidden = true;
+
+  // Load gateway device image from Log Insight API
+  controllerImg.src = `${baseUrl}/api/unifi/gateway-image`;
+  controllerImg.onload = () => { controllerImg.hidden = false; };
+  controllerImg.onerror = () => { controllerImg.hidden = true; };
 
   const ctrlUrl = settings.controllerUrl;
 

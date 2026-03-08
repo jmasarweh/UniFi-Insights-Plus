@@ -24,8 +24,10 @@ export async function getSettings() {
 export async function saveSettings(settings) {
   try {
     await chrome.storage.sync.set(settings);
+    return true;
   } catch (err) {
     console.error('saveSettings failed:', err);
+    return false;
   }
 }
 

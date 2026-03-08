@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,25 +10,21 @@
     <div class="header">
       <img src="../icons/icon-32.png" alt="" class="logo">
       <h1>UniFi Log Insight</h1>
-      <button type="button" id="bell-btn" class="icon-btn" title="Notifications (coming soon)" disabled>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-      </button>
     </div>
 
-    <!-- Setup View (shown when not configured) -->
+    <!-- Setup View -->
     <div id="setup-view" class="view" hidden>
-      <p class="subtitle">Enter your Log Insight server address:</p>
-      <div class="input-group">
-        <input type="url" id="url-input" placeholder="http://192.168.1.50:8090" spellcheck="false">
-        <button id="connect-btn">Connect</button>
+      <p class="hint">Log Insight server address</p>
+      <div class="server-row">
+        <input type="text" id="host-input" placeholder="192.168.1.50" spellcheck="false" aria-label="Log Insight server host">
+        <span class="port-sep">:</span>
+        <input type="text" id="port-input" value="8090" spellcheck="false" class="port-field" aria-label="Log Insight server port">
       </div>
-      <p id="setup-error" class="error" hidden></p>
+      <button type="button" id="connect-btn" class="btn-primary full-width">Connect</button>
+      <p id="setup-error" class="error" hidden aria-live="polite"></p>
     </div>
 
-    <!-- Connected View (shown when configured) -->
+    <!-- Connected View -->
     <div id="connected-view" class="view" hidden>
       <div class="status-row">
         <span class="status-dot" id="status-dot"></span>
@@ -48,44 +44,72 @@
       </div>
 
       <div class="links">
-        <a id="open-logs" class="link-btn" href="#" target="_blank" rel="noopener noreferrer" aria-label="Log Stream (opens in new tab)">Log Stream</a>
-        <a id="open-threat-map" class="link-btn" href="#" target="_blank" rel="noopener noreferrer" aria-label="Threat Map (opens in new tab)">Threat Map</a>
-        <a id="open-dashboard" class="link-btn" href="#" target="_blank" rel="noopener noreferrer" aria-label="Dashboard (opens in new tab)">Dashboard</a>
+        <a id="open-logs" class="link-btn" href="#" target="_blank" rel="noopener noreferrer">Log Stream</a>
+        <a id="open-threat-map" class="link-btn" href="#" target="_blank" rel="noopener noreferrer">Threat Map</a>
+        <a id="open-dashboard" class="link-btn" href="#" target="_blank" rel="noopener noreferrer">Dashboard</a>
       </div>
 
+      <!-- Controller Section -->
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">UniFi Controller</span>
+          <span id="controller-status" class="status-pill" hidden></span>
+        </div>
+
+        <!-- Display row: shown when we have a URL and not editing -->
+        <div id="controller-display" class="controller-display" hidden>
+          <img id="controller-img" class="controller-img" alt="" hidden>
+          <span id="controller-url" class="controller-url"></span>
+          <button type="button" id="edit-controller-btn" class="btn-icon" title="Edit">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
+        </div>
+
+        <!-- Edit row: shown when editing or no URL set -->
+        <div id="controller-edit" hidden>
+          <div class="server-row compact">
+            <input type="text" id="controller-input" placeholder="10.10.10.1" spellcheck="false" aria-label="Unifi Controller Address">
+            <button type="button" id="save-controller-btn" class="btn-sm">Save</button>
+          </div>
+          <p class="hint small">IP or hostname of your UniFi controller</p>
+        </div>
+
+        <!-- Grant access banner -->
+        <div id="grant-banner" class="grant-banner" hidden>
+          <span>Browser access needed</span>
+          <button type="button" id="grant-btn" class="btn-sm">Grant Access</button>
+        </div>
+
+        <p id="controller-error" class="error" hidden aria-live="polite"></p>
+      </div>
+
+      <!-- Feature toggles -->
       <div class="toggles">
         <label class="toggle">
-          <input type="checkbox" id="toggle-tab" checked aria-label="Inject Controller Tab">
-          <span>Inject Controller Tab</span>
+          <input type="checkbox" id="toggle-tab" checked>
+          <span>Add Log Insight Tab to UniFi Controller</span>
         </label>
         <label class="toggle">
-          <input type="checkbox" id="toggle-enrich" checked aria-label="Enrich Flow View">
+          <input type="checkbox" id="toggle-enrich" checked>
           <span>Enrich Flow View</span>
         </label>
       </div>
 
       <div id="reload-bar" class="reload-bar" hidden>
-        <span>Reload controller page to apply</span>
-        <button id="reload-btn" class="reload-btn">Reload</button>
+        <span>Reload UniFi page to apply</span>
+        <button type="button" id="reload-btn" class="btn-sm">Reload</button>
       </div>
 
-      <button id="disconnect-btn" class="link-btn secondary">Change Server</button>
+      <button type="button" id="disconnect-btn" class="btn-reset">Reset Extension</button>
     </div>
 
-    <!-- Permission Request -->
-    <div id="permission-view" class="view" hidden>
-      <p class="subtitle">Grant access to your UniFi Controller to enable injection features:</p>
-      <p id="permission-origin" class="mono"></p>
-      <button id="grant-btn">Grant Access</button>
-    </div>
-
-    <!-- Debug (for issue reports) -->
     <details class="debug-details">
-      <summary class="debug-summary">Debug State</summary>
+      <summary class="debug-summary">Debug</summary>
       <pre id="debug-out" class="debug-out">Loading...</pre>
     </details>
   </div>
 
+  <script src="../lib/url-utils.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
