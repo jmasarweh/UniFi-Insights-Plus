@@ -1,8 +1,10 @@
+// -- Elements --
+
 const setupView = document.getElementById('setup-view');
 const connectedView = document.getElementById('connected-view');
-const permissionView = document.getElementById('permission-view');
 
-const urlInput = document.getElementById('url-input');
+const hostInput = document.getElementById('host-input');
+const portInput = document.getElementById('port-input');
 const connectBtn = document.getElementById('connect-btn');
 const setupError = document.getElementById('setup-error');
 
@@ -16,26 +18,108 @@ const openDashboard = document.getElementById('open-dashboard');
 const openThreatMap = document.getElementById('open-threat-map');
 const openLogs = document.getElementById('open-logs');
 
+const controllerStatus = document.getElementById('controller-status');
+const controllerDisplay = document.getElementById('controller-display');
+const controllerUrl = document.getElementById('controller-url');
+const editControllerBtn = document.getElementById('edit-controller-btn');
+const controllerEdit = document.getElementById('controller-edit');
+const controllerInput = document.getElementById('controller-input');
+const saveControllerBtn = document.getElementById('save-controller-btn');
+const grantBanner = document.getElementById('grant-banner');
+const grantBtn = document.getElementById('grant-btn');
+const controllerError = document.getElementById('controller-error');
+
 const toggleTab = document.getElementById('toggle-tab');
 const toggleEnrich = document.getElementById('toggle-enrich');
-const disconnectBtn = document.getElementById('disconnect-btn');
-
-const grantBtn = document.getElementById('grant-btn');
-const permissionOrigin = document.getElementById('permission-origin');
-
 const reloadBar = document.getElementById('reload-bar');
 const reloadBtn = document.getElementById('reload-btn');
+const disconnectBtn = document.getElementById('disconnect-btn');
 
-// Track initial toggle state to avoid unnecessary reload prompts
 let initialTabInjection = true;
 let initialFlowEnrichment = true;
+const PERMISSION_RETRY_DELAYS_MS = [0, 120, 300, 700];
+const POPUP_LOG_PREFIX = '[ULI][Popup]';
+
+function popupLog(...args) {
+  console.log(POPUP_LOG_PREFIX, ...args);
+}
+
+function popupWarn(...args) {
+  console.warn(POPUP_LOG_PREFIX, ...args);
+}
+
+// -- Helpers --
+
+/** Auto-prepend protocol if bare IP/hostname entered */
+function normalizeUrl(input, defaultProto = 'http') {
+  let val = input.trim().replace(/\/+$/, '');
+  if (!val) return '';
+  if (!/^https?:\/\//i.test(val)) {
+    val = `${defaultProto}://${val}`;
+  }
+  return val;
+}
+
+function toOriginPattern(url) {
+  try {
+    const u = new URL(url);
+    const hostPort = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    return `${u.protocol}//${hostPort}/*`;
+  } catch {
+    return null;
+  }
+}
+
+function formatNumber(n) {
+  if (n === null || n === undefined) return '-';
+  return n.toLocaleString();
+}
+
+function stripProto(url) {
+  return url.replace(/^https?:\/\//, '');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function hasPermissionWithRetry(origin, delaysMs = PERMISSION_RETRY_DELAYS_MS) {
+  if (!origin) return false;
+  for (let i = 0; i < delaysMs.length; i++) {
+    if (delaysMs[i] > 0) await sleep(delaysMs[i]);
+    try {
+      const hasPermission = await chrome.permissions.contains({ origins: [origin] });
+      popupLog('permission check', { origin, attempt: i + 1, hasPermission });
+      if (hasPermission) return true;
+    } catch (err) {
+      popupWarn('permission check failed', { origin, attempt: i + 1, error: err?.message });
+      return false;
+    }
+  }
+  return false;
+}
+
+function setControllerPermissionState(hasPermission) {
+  controllerStatus.hidden = false;
+  if (hasPermission) {
+    controllerStatus.textContent = 'Active';
+    controllerStatus.className = 'status-pill active';
+    grantBanner.hidden = true;
+    return;
+  }
+  controllerStatus.textContent = 'Needs Access';
+  controllerStatus.className = 'status-pill pending';
+  grantBanner.hidden = false;
+}
 
 // -- Init --
 
 async function init() {
+  popupLog('init start');
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
-    if (!resp || !resp.ok) {
+    if (!resp || !resp.ok || !resp.data) {
+      popupWarn('GET_CONFIG failed; switching to setup', { response: resp });
       showSetup();
       return;
     }
@@ -51,14 +135,7 @@ async function init() {
       return;
     }
 
-    // Check for pending permission grant
-    const cached = await chrome.storage.local.get('pendingOrigin');
-    if (cached.pendingOrigin) {
-      showPermissionRequest(cached.pendingOrigin);
-      return;
-    }
-
-    showConnected(settings);
+    await showConnected(settings);
   } catch (err) {
     console.error('Popup init error:', err);
     showSetup();
@@ -70,12 +147,24 @@ async function init() {
 function showSetup() {
   setupView.hidden = false;
   connectedView.hidden = true;
-  permissionView.hidden = true;
 }
 
 connectBtn.addEventListener('click', async () => {
-  const url = urlInput.value.trim().replace(/\/+$/, '');
-  if (!url) { showError('Please enter a URL'); return; }
+  const host = hostInput.value.trim();
+  const port = portInput.value.trim() || '8090';
+  if (!host) {
+    showSetupError('Please enter an address');
+    return;
+  }
+
+  const url = normalizeUrl(`${host}:${port}`, 'http');
+
+  try {
+    new URL(url);
+  } catch {
+    showSetupError('Invalid address');
+    return;
+  }
 
   connectBtn.textContent = 'Connecting...';
   connectBtn.disabled = true;
@@ -85,60 +174,33 @@ connectBtn.addEventListener('click', async () => {
     const resp = await chrome.runtime.sendMessage({ type: 'SET_BASE_URL', url });
 
     if (resp.ok) {
-      const settings = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
-
-      // Check if permission is needed
-      const cached = await chrome.storage.local.get('pendingOrigin');
-      if (cached.pendingOrigin) {
-        showPermissionRequest(cached.pendingOrigin);
-      } else {
-        showConnected(settings.data);
+      const cfg = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
+      if (!cfg || !cfg.ok || !cfg.data) {
+        showSetupError('Connected but failed to load settings');
+        return;
       }
+      await showConnected(cfg.data);
     } else {
-      showError(resp.error || 'Could not connect to Log Insight server');
+      showSetupError(resp.error || 'Could not reach server');
     }
   } catch (err) {
-    showError(err.message || 'Connection failed');
+    showSetupError(err.message || 'Connection failed');
   } finally {
     connectBtn.textContent = 'Connect';
     connectBtn.disabled = false;
   }
 });
 
-urlInput.addEventListener('keydown', (e) => {
+hostInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') connectBtn.click();
+});
+portInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') connectBtn.click();
 });
 
-function showError(msg) {
+function showSetupError(msg) {
   setupError.textContent = msg;
   setupError.hidden = false;
-}
-
-// -- Permission View --
-
-function showPermissionRequest(origin) {
-  setupView.hidden = true;
-  connectedView.hidden = true;
-  permissionView.hidden = false;
-  permissionOrigin.textContent = origin;
-
-  function onGrantClick() {
-    grantBtn.removeEventListener('click', onGrantClick);
-    chrome.permissions.request({ origins: [origin] }).then(async (granted) => {
-      if (granted) {
-        await chrome.storage.local.remove('pendingOrigin');
-        await chrome.runtime.sendMessage({ type: 'PERMISSION_GRANTED' });
-        const settings = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
-        showConnected(settings.data);
-      } else {
-        grantBtn.textContent = 'Permission Denied — Retry';
-        grantBtn.addEventListener('click', onGrantClick);
-      }
-    });
-  }
-
-  grantBtn.textContent = 'Grant Access';
-  grantBtn.addEventListener('click', onGrantClick);
 }
 
 // -- Connected View --
@@ -146,25 +208,71 @@ function showPermissionRequest(origin) {
 async function showConnected(settings) {
   setupView.hidden = true;
   connectedView.hidden = true;
-  permissionView.hidden = true;
 
   const baseUrl = settings.logInsightUrl;
 
-  // Set quick links
+  // Quick links
   openDashboard.href = baseUrl;
   openThreatMap.href = baseUrl + '/#threat-map';
   openLogs.href = baseUrl + '/#logs';
 
-  // Health check
-  const resp = await chrome.runtime.sendMessage({ type: 'HEALTH_CHECK' });
-  if (resp.ok && resp.data) {
-    statusDot.className = 'status-dot connected';
-    statusText.textContent = 'Connected';
-    versionBadge.textContent = `v${resp.data.version}`;
-    totalLogs.textContent = formatNumber(resp.data.total_logs);
-    // TODO: Replace with real /api/stats/blocked-today endpoint
-    blockedToday.textContent = '-';
+  // Reset controller section
+  controllerDisplay.hidden = true;
+  controllerEdit.hidden = true;
+  grantBanner.hidden = true;
+  controllerError.hidden = true;
+  controllerStatus.hidden = true;
+
+  const ctrlUrl = settings.controllerUrl;
+
+  if (ctrlUrl) {
+    // We have a controller URL — show it
+    controllerUrl.textContent = stripProto(ctrlUrl);
+    controllerUrl.title = ctrlUrl;
+    controllerDisplay.hidden = false;
+
+    // Check permission
+    const origin = toOriginPattern(ctrlUrl);
+    let hasPermission = false;
+    if (origin) {
+      hasPermission = await hasPermissionWithRetry(origin);
+      try {
+        const pending = await chrome.storage.local.get('pendingOrigin');
+        popupLog('showConnected controller state', {
+          controllerUrl: ctrlUrl,
+          origin,
+          hasPermission,
+          pendingOrigin: pending.pendingOrigin || null,
+        });
+      } catch (err) {
+        popupWarn('failed to read pendingOrigin', { error: err?.message });
+      }
+    }
+
+    setControllerPermissionState(hasPermission);
   } else {
+    // No controller URL — show edit form
+    controllerEdit.hidden = false;
+    controllerStatus.textContent = 'Not Set';
+    controllerStatus.className = 'status-pill pending';
+    controllerStatus.hidden = false;
+  }
+
+  // Health check
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: 'HEALTH_CHECK' });
+    if (resp.ok && resp.data) {
+      statusDot.className = 'status-dot connected';
+      statusText.textContent = 'Connected';
+      versionBadge.textContent = `v${resp.data.version}`;
+      totalLogs.textContent = formatNumber(resp.data.total_logs);
+      blockedToday.textContent = '-';
+    } else {
+      statusDot.className = 'status-dot disconnected';
+      statusText.textContent = 'Unreachable';
+      versionBadge.textContent = '';
+    }
+  } catch {
     statusDot.className = 'status-dot disconnected';
     statusText.textContent = 'Unreachable';
     versionBadge.textContent = '';
@@ -173,6 +281,131 @@ async function showConnected(settings) {
   connectedView.hidden = false;
 }
 
+// -- Grant Access --
+
+grantBtn.addEventListener('click', () => {
+  const ctrlUrl = controllerUrl.title;
+  if (!ctrlUrl) return;
+
+  const origin = toOriginPattern(ctrlUrl);
+  if (!origin) return;
+
+  controllerError.hidden = true;
+  grantBtn.disabled = true;
+  grantBtn.textContent = 'Granting...';
+  popupLog('requesting permission', { origin, controllerUrl: ctrlUrl });
+
+  // permissions.request MUST be the first async call (Firefox gesture requirement)
+  chrome.permissions.request({ origins: [origin] }).then(async (granted) => {
+    popupLog('permission request resolved', { origin, granted });
+    grantBtn.disabled = false;
+    grantBtn.textContent = 'Grant Access';
+
+    if (granted) {
+      await chrome.storage.local.remove('pendingOrigin');
+      const resp = await chrome.runtime.sendMessage({
+        type: 'PERMISSION_GRANTED',
+        origin,
+        controllerUrl: ctrlUrl,
+      });
+      popupLog('PERMISSION_GRANTED response', resp);
+      const hasPermission = await hasPermissionWithRetry(origin);
+      setControllerPermissionState(hasPermission);
+      if (!hasPermission) {
+        controllerError.textContent = 'Permission propagation delayed. Reopen popup in a moment.';
+        controllerError.hidden = false;
+      }
+    } else {
+      controllerError.textContent = 'Permission denied — please try again';
+      controllerError.hidden = false;
+    }
+  }).catch((err) => {
+    // Firefox: popup may close during dialog. Service worker onAdded handles it.
+    // If we're still alive, just reset the button.
+    popupWarn('permission request rejected/aborted', { origin, error: err?.message });
+    grantBtn.disabled = false;
+    grantBtn.textContent = 'Grant Access';
+  });
+});
+
+// -- Edit Controller --
+
+editControllerBtn.addEventListener('click', () => {
+  // Pre-fill with current URL (stripped of protocol for easy editing)
+  const current = controllerUrl.title || '';
+  controllerInput.value = stripProto(current);
+  controllerDisplay.hidden = true;
+  controllerEdit.hidden = false;
+  controllerError.hidden = true;
+  grantBanner.hidden = true;
+  controllerInput.focus();
+});
+
+// -- Save Controller --
+
+saveControllerBtn.addEventListener('click', () => {
+  const raw = controllerInput.value.trim();
+  if (!raw) {
+    controllerError.textContent = 'Please enter an address';
+    controllerError.hidden = false;
+    return;
+  }
+
+  // UniFi controllers default to HTTPS
+  const url = normalizeUrl(raw, 'https');
+
+  let origin;
+  try {
+    origin = toOriginPattern(url);
+    if (!origin) throw new Error();
+  } catch {
+    controllerError.textContent = 'Invalid address';
+    controllerError.hidden = false;
+    return;
+  }
+
+  controllerError.hidden = true;
+  saveControllerBtn.disabled = true;
+  saveControllerBtn.textContent = 'Saving...';
+  popupLog('requesting permission for controller save', { origin, url });
+
+  // Request permission first (Firefox: must be first async call from click handler)
+  chrome.permissions.request({ origins: [origin] }).then(async (granted) => {
+    popupLog('save controller permission resolved', { origin, granted, url });
+    // Save URL regardless of permission outcome
+    await chrome.runtime.sendMessage({ type: 'SET_CONTROLLER_URL', url });
+
+    if (granted) {
+      await chrome.storage.local.remove('pendingOrigin');
+      const resp = await chrome.runtime.sendMessage({
+        type: 'PERMISSION_GRANTED',
+        origin,
+        controllerUrl: url,
+      });
+      popupLog('PERMISSION_GRANTED response (save flow)', resp);
+    }
+
+    saveControllerBtn.disabled = false;
+    saveControllerBtn.textContent = 'Save';
+
+    // Refresh to show new state
+    init();
+  }).catch(async (err) => {
+    // Firefox popup might close. Save the URL anyway so next open picks it up.
+    popupWarn('save controller permission request rejected/aborted', { origin, url, error: err?.message });
+    try {
+      await chrome.runtime.sendMessage({ type: 'SET_CONTROLLER_URL', url });
+    } catch { /* popup closing */ }
+
+    saveControllerBtn.disabled = false;
+    saveControllerBtn.textContent = 'Save';
+  });
+});
+
+controllerInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') saveControllerBtn.click();
+});
+
 // -- Toggles --
 
 function onToggleChanged() {
@@ -180,7 +413,6 @@ function onToggleChanged() {
     enableTabInjection: toggleTab.checked,
     enableFlowEnrichment: toggleEnrich.checked,
   });
-  // Only show reload bar if values differ from initial state
   const changed = toggleTab.checked !== initialTabInjection ||
                   toggleEnrich.checked !== initialFlowEnrichment;
   reloadBar.hidden = !changed;
@@ -189,44 +421,44 @@ function onToggleChanged() {
 toggleTab.addEventListener('change', onToggleChanged);
 toggleEnrich.addEventListener('change', onToggleChanged);
 
-// -- Reload controller tab --
+// -- Reload controller tabs --
 
 reloadBtn.addEventListener('click', async () => {
   reloadBar.hidden = true;
-  // Update baseline so toggling back doesn't re-show the bar
   initialTabInjection = toggleTab.checked;
   initialFlowEnrichment = toggleEnrich.checked;
 
   const resp = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
-  const controllerUrl = resp?.data?.controllerUrl;
-  if (!controllerUrl) return;
+  const ctrlUrl = resp?.data?.controllerUrl;
+  if (!ctrlUrl) return;
 
   try {
-    const origin = new URL(controllerUrl).origin;
-    const tabs = await chrome.tabs.query({ url: origin + '/*' });
+    const origin = new URL(ctrlUrl).origin;
+    const tabs = await chrome.tabs.query({ url: [origin + '/*'] });
     for (const tab of tabs) {
       chrome.tabs.reload(tab.id);
     }
-  } catch (err) {
-    console.debug('Failed to reload controller tabs:', err);
-  }
+  } catch { /* ignore */ }
 });
 
-// -- Disconnect --
+// -- Reset --
 
 disconnectBtn.addEventListener('click', async () => {
+  try {
+    const perms = await chrome.permissions.getAll();
+    const dynamicOrigins = (perms.origins || []).filter(o =>
+      !o.includes('chrome-extension://') && !o.includes('moz-extension://')
+    );
+    if (dynamicOrigins.length > 0) {
+      await chrome.permissions.remove({ origins: dynamicOrigins });
+    }
+  } catch { /* ignore */ }
+
   await chrome.storage.sync.set({ logInsightUrl: '', controllerUrl: '', configured: false });
-  await chrome.storage.local.clear();
+  await chrome.storage.local.remove(['pendingOrigin', 'health']);
   await chrome.runtime.sendMessage({ type: 'DISCONNECT' });
   showSetup();
 });
-
-// -- Helpers --
-
-function formatNumber(n) {
-  if (n === null || n === undefined) return '-';
-  return n.toLocaleString();
-}
 
 // -- Debug --
 

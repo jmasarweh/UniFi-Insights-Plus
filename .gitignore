@@ -18,6 +18,9 @@ htmlcov/
 ui/node_modules/
 ui/dist/
 
+# Extension build output
+extension/dist/
+
 # Logs
 *.log
 

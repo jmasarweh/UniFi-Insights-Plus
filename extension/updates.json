@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "unifi-log-insight@jmasarweh": {
+      "updates": [
+        {
+          "version": "1.0.0",
+          "update_link": "https://github.com/jmasarweh/unifi-log-insight/releases/download/ext-v1.0.0/unifi_log_insight-1.0.0.xpi"
+        }
+      ]
+    }
+  }
+}

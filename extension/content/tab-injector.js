@@ -13,7 +13,13 @@ window.addEventListener('uli-ready', async function () {
   const logInsightUrl = config.baseUrl;
   if (!logInsightUrl) return;
 
-  const logInsightOrigin = new URL(logInsightUrl).origin;
+  let logInsightOrigin;
+  try {
+    logInsightOrigin = new URL(logInsightUrl).origin;
+  } catch (e) {
+    console.error('Invalid Log Insight URL:', logInsightUrl, e);
+    return;
+  }
   const iconUrl = chrome.runtime.getURL('icons/icon-32.png');
 
   let isActive = false;

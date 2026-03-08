@@ -2,6 +2,40 @@ import { DEFAULT_BASE_URL } from '../lib/constants.js';
 import { getSettings, saveSettings, setCache } from '../lib/storage.js';
 import { checkHealth, fetchUniFiSettings, batchThreatLookup, setBaseUrl, getBaseUrl } from '../lib/api-client.js';
 
+const SW_LOG_PREFIX = '[ULI][SW]';
+const PERMISSION_RETRY_DELAYS_MS = [0, 150, 350, 800, 1200];
+
+function swLog(...args) {
+  console.log(SW_LOG_PREFIX, ...args);
+}
+
+function swWarn(...args) {
+  console.warn(SW_LOG_PREFIX, ...args);
+}
+
+function swError(...args) {
+  console.error(SW_LOG_PREFIX, ...args);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function hasPermissionWithRetry(origin, source, delaysMs = PERMISSION_RETRY_DELAYS_MS) {
+  for (let i = 0; i < delaysMs.length; i++) {
+    if (delaysMs[i] > 0) await sleep(delaysMs[i]);
+    try {
+      const hasPermission = await chrome.permissions.contains({ origins: [origin] });
+      swLog('permission check', { source, origin, attempt: i + 1, hasPermission });
+      if (hasPermission) return true;
+    } catch (err) {
+      swWarn('permission check failed', { source, origin, attempt: i + 1, error: err?.message });
+      return false;
+    }
+  }
+  return false;
+}
+
 // ── Startup & Auto-Discovery ────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -19,6 +53,7 @@ chrome.runtime.onStartup.addListener(() => {
  * 3. Register content scripts for the controller origin
  */
 async function discover() {
+  swLog('discover start');
   try {
     const settings = await getSettings();
 
@@ -60,33 +95,46 @@ async function onConnected(health, settings) {
   await saveSettings({ configured: true });
 
   // Discover controller URL from UniFi settings
-  if (!settings.controllerUrl) {
-    const unifi = await fetchUniFiSettings();
-    if (unifi && unifi.host) {
-      const controllerUrl = unifi.host.replace(/\/+$/, '');
-      await saveSettings({ controllerUrl });
-      await registerContentScripts(controllerUrl);
+  try {
+    if (!settings.controllerUrl) {
+      const unifi = await fetchUniFiSettings();
+      if (unifi && unifi.host) {
+        const controllerUrl = unifi.host.replace(/\/+$/, '');
+        await saveSettings({ controllerUrl });
+        await registerContentScripts(controllerUrl, { source: 'onConnected:auto-discovered' });
+      }
+    } else {
+      await registerContentScripts(settings.controllerUrl, { source: 'onConnected:existing-controller' });
     }
-  } else {
-    await registerContentScripts(settings.controllerUrl);
+  } catch (err) {
+    swError('Controller discovery/registration failed:', err);
   }
 }
 
 // ── Dynamic Content Script Registration ─────────────────────────────────────
 
-async function registerContentScripts(controllerUrl) {
-  if (!controllerUrl) return;
+async function registerContentScripts(controllerUrl, options = {}) {
+  const source = options.source || 'unknown';
+  if (!controllerUrl) {
+    swWarn('registerContentScripts skipped: missing controllerUrl', { source });
+    return { ok: false, reason: 'missing_controller_url' };
+  }
 
   // Build origin match pattern from controller URL
   const origin = toOriginPattern(controllerUrl);
-  if (!origin) return;
+  if (!origin) {
+    swWarn('registerContentScripts skipped: invalid controller URL', { source, controllerUrl });
+    return { ok: false, reason: 'invalid_controller_url' };
+  }
+  swLog('registerContentScripts start', { source, controllerUrl, origin });
 
   // Check host permission for the controller origin
-  const hasPermission = await chrome.permissions.contains({ origins: [origin] });
+  const hasPermission = await hasPermissionWithRetry(origin, source);
   if (!hasPermission) {
     // Can't request permissions from service worker — store for popup to handle
     await chrome.storage.local.set({ pendingOrigin: origin });
-    return;
+    swWarn('registerContentScripts blocked by missing permission; pendingOrigin saved', { source, origin });
+    return { ok: false, reason: 'missing_permission', origin };
   }
 
   // Permission granted — clear any pending request
@@ -97,23 +145,51 @@ async function registerContentScripts(controllerUrl) {
     await chrome.scripting.unregisterContentScripts({ ids: ['uli-controller'] });
   } catch { /* ignore if not registered */ }
 
-  // Register all content scripts together — they share the same isolated world.
-  // controller-detector.js runs first, dispatches 'uli-ready' for the others.
+  // Register content scripts for future page loads.
+  const scripts = [
+    'content/controller-detector.js',
+    'content/tab-injector.js',
+    'content/flow-enricher.js',
+  ];
   try {
     await chrome.scripting.registerContentScripts([{
       id: 'uli-controller',
       matches: [origin],
-      js: [
-        'content/controller-detector.js',
-        'content/tab-injector.js',
-        'content/flow-enricher.js',
-      ],
+      js: scripts,
       css: ['content/styles.css'],
       runAt: 'document_idle',
     }]);
   } catch (err) {
-    console.error(`Failed to register content scripts for origin ${origin}:`, err);
+    swError(`Failed to register content scripts for origin ${origin}:`, err);
+    return { ok: false, reason: 'register_failed', origin, error: err?.message };
   }
+
+  // Inject into already-open controller tabs so the user doesn't have to refresh.
+  let tabCount = 0;
+  let injectedTabs = 0;
+  try {
+    const tabs = await chrome.tabs.query({ url: [origin] });
+    tabCount = tabs.length;
+    swLog('injecting scripts into open tabs', { source, origin, tabCount });
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      try {
+        await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content/styles.css'] });
+      } catch (err) {
+        swWarn('insertCSS failed', { source, tabId: tab.id, error: err?.message });
+      }
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: scripts });
+        injectedTabs += 1;
+      } catch (err) {
+        swWarn('executeScript failed', { source, tabId: tab.id, error: err?.message });
+      }
+    }
+  } catch (err) {
+    swWarn('tabs query for injection failed', { source, origin, error: err?.message });
+  }
+  swLog('registerContentScripts complete', { source, origin, tabCount, injectedTabs });
+  return { ok: true, origin, tabCount, injectedTabs };
 }
 
 /**
@@ -130,6 +206,36 @@ function toOriginPattern(url) {
     return null;
   }
 }
+
+// ── Permission Granted Fallback (Firefox popup closes during permission dialog) ─
+
+chrome.permissions.onAdded.addListener(async (permissions) => {
+  const origins = permissions.origins || [];
+  if (origins.length === 0) return;
+  swLog('permissions.onAdded fired', { origins });
+
+  // Clear pending origin if it matches the newly granted permission
+  const cached = await chrome.storage.local.get('pendingOrigin');
+  if (cached.pendingOrigin && origins.includes(cached.pendingOrigin)) {
+    await chrome.storage.local.remove('pendingOrigin');
+    swLog('cleared pendingOrigin from onAdded', { pendingOrigin: cached.pendingOrigin });
+  }
+
+  // Register content scripts for the controller if we have the URL
+  const settings = await getSettings();
+  if (settings.controllerUrl) {
+    const origin = toOriginPattern(settings.controllerUrl);
+    if (origin && origins.includes(origin)) {
+      await registerContentScripts(settings.controllerUrl, { source: 'permissions.onAdded' });
+    } else {
+      swLog('permissions.onAdded origin did not match current controllerUrl', {
+        currentControllerUrl: settings.controllerUrl,
+        currentOrigin: origin,
+        grantedOrigins: origins,
+      });
+    }
+  }
+});
 
 // ── Badge Icon ──────────────────────────────────────────────────────────────
 
@@ -175,6 +281,11 @@ async function handleMessage(msg) {
         return { ok: false, error: 'Missing or invalid url' };
       }
       const url = msg.url.replace(/\/+$/, '');
+      try {
+        new URL(url);
+      } catch {
+        return { ok: false, error: 'Invalid URL format' };
+      }
       const health = await checkHealth(url);
       if (!health) return { ok: false, error: 'Could not connect' };
       const currentSettings = await getSettings();
@@ -184,13 +295,36 @@ async function handleMessage(msg) {
       return { ok: true, data: health };
     }
 
+    case 'SET_CONTROLLER_URL': {
+      if (typeof msg.url !== 'string' || !msg.url.trim()) {
+        return { ok: false, error: 'Missing or invalid url' };
+      }
+      const controllerUrl = msg.url.replace(/\/+$/, '');
+      try {
+        new URL(controllerUrl);
+      } catch {
+        return { ok: false, error: 'Invalid URL format' };
+      }
+      await saveSettings({ controllerUrl });
+      swLog('controller URL saved', { controllerUrl });
+      return { ok: true };
+    }
+
     case 'PERMISSION_GRANTED': {
       // Called from popup after user grants permission
       const settings = await getSettings();
-      if (settings.controllerUrl) {
-        await registerContentScripts(settings.controllerUrl);
+      const controllerUrl = typeof msg.controllerUrl === 'string' && msg.controllerUrl.trim()
+        ? msg.controllerUrl.replace(/\/+$/, '')
+        : settings.controllerUrl;
+      swLog('PERMISSION_GRANTED message received', {
+        origin: msg.origin || null,
+        controllerUrl,
+      });
+      if (controllerUrl) {
+        const result = await registerContentScripts(controllerUrl, { source: 'message:PERMISSION_GRANTED' });
+        return { ok: true, data: result };
       }
-      return { ok: true };
+      return { ok: false, error: 'No controller URL available after permission grant' };
     }
 
     case 'GET_BASE_URL': {
@@ -227,6 +361,9 @@ async function handleMessage(msg) {
     case 'DISCONNECT': {
       setBaseUrl('');
       setBadge('?', '#fbbf24');
+      try {
+        await chrome.scripting.unregisterContentScripts({ ids: ['uli-controller'] });
+      } catch { /* ignore if not registered */ }
       return { ok: true };
     }
 

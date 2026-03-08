@@ -320,6 +320,9 @@ window.addEventListener('uli-ready', function () {
       if (lower === '::1' || lower.startsWith('fe80:') ||
           /^f[cd][0-9a-f]{2}:/.test(lower) ||
           lower === '::') return true;
+      // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check embedded IPv4
+      const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+      if (mapped) return isPrivateIP(mapped[1]);
       return false;
     }
     // IPv4 private ranges

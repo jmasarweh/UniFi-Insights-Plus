@@ -32,12 +32,16 @@ def batch_threat_lookup(req: BatchThreatRequest):
     if len(req.ips) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 IPs per batch request")
 
-    # Validate all IPs
+    # Validate and deduplicate IPs (preserving order)
+    seen = set()
     valid_ips = []
     for ip in req.ips:
+        if ip in seen:
+            continue
         try:
             ipaddress.ip_address(ip)
             valid_ips.append(ip)
+            seen.add(ip)
         except ValueError:
             pass  # skip invalid IPs silently
 
@@ -93,6 +97,9 @@ def batch_threat_lookup(req: BatchThreatRequest):
                         'ip': ip,
                         'threat_score': None,
                         'threat_categories': None,
+                        'abuse_usage_type': None,
+                        'abuse_total_reports': None,
+                        'abuse_is_tor': None,
                         'rdns': row['rdns'],
                         'asn_name': row['asn_name'],
                     }
