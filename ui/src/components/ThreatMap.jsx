@@ -4,6 +4,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker?url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { fetchThreatGeo } from '../api'
 import { formatNumber } from '../utils'
+import { THREAT_LEVELS } from '../lib/threatPresentation'
 import useTimeRange from '../hooks/useTimeRange'
 import ThreatSidebar from './ThreatSidebar'
 
@@ -25,6 +26,24 @@ const TILE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.jso
 
 const ALL_LAYERS = ['threat-heat', 'heat-points', 'threat-clusters', 'cluster-count', 'unclustered-point']
 
+// Build MapLibre 'step' expression from THREAT_LEVELS for score-based coloring.
+// Produces: ['step', expr, color0, min1, color1, min2, color2, ...]
+// THREAT_LEVELS is sorted descending by min; 'step' needs ascending thresholds.
+const SCORE_STEP = (() => {
+  const asc = [...THREAT_LEVELS].reverse()
+  const expr = ['step', ['get', 'max_score'], asc[0].hex]
+  for (let i = 1; i < asc.length; i++) expr.push(asc[i].min, asc[i].hex)
+  return expr
+})()
+
+// Same but using 'interpolate' for smooth gradient (heatmap points)
+const SCORE_INTERPOLATE = (() => {
+  const asc = [...THREAT_LEVELS].reverse()
+  const expr = ['interpolate', ['linear'], ['get', 'max_score']]
+  for (const t of asc) expr.push(t.min, t.hex)
+  return expr
+})()
+
 function getTheme() {
   return document.documentElement.getAttribute('data-theme') || 'dark'
 }
@@ -37,12 +56,20 @@ function el(tag, className, text) {
   return node
 }
 
-/** Remove all threat layers + source from the map */
+/** Remove all threat layers + source from the map.
+ *  Hides layers before removal to flush the GPU heatmap framebuffer,
+ *  preventing the heat texture from lingering during view switches. */
 function cleanupLayers(map) {
   ALL_LAYERS.forEach(id => {
-    try { if (map.getLayer(id)) map.removeLayer(id) } catch (_) { /* noop */ }
+    try {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', 'none')
+        map.removeLayer(id)
+      }
+    } catch (_) { /* noop */ }
   })
   try { if (map.getSource('threats')) map.removeSource('threats') } catch (_) { /* noop */ }
+  map.triggerRepaint()
 }
 
 /** Apply heatmap or cluster layers to the map (with auto-retry on failure) */
@@ -98,13 +125,7 @@ function applyLayers(map, geoData, view, _retry) {
           'circle-radius': ['interpolate', ['linear'], ['get', 'count'],
             1, 4, 10, 7, 50, 11, 200, 16,
           ],
-          'circle-color': [
-            'interpolate', ['linear'], ['get', 'max_score'],
-            0, '#60a5fa',
-            50, '#fbbf24',
-            70, '#f87171',
-            85, '#dc2626',
-          ],
+          'circle-color': SCORE_INTERPOLATE,
           'circle-opacity': ['interpolate', ['linear'], ['zoom'],
             6, 0, 8, 0.8,
           ],
@@ -132,13 +153,7 @@ function applyLayers(map, geoData, view, _retry) {
         source: 'threats',
         filter: ['has', 'point_count'],
         paint: {
-          'circle-color': [
-            'step', ['get', 'max_score'],
-            '#3b82f6', 50,
-            '#f59e0b', 70,
-            '#ef4444', 85,
-            '#991b1b',
-          ],
+          'circle-color': SCORE_STEP,
           'circle-radius': ['step', ['get', 'sum_count'], 18, 10, 24, 50, 32, 200, 42],
           'circle-opacity': 0.85,
           'circle-stroke-width': 2,
@@ -167,13 +182,7 @@ function applyLayers(map, geoData, view, _retry) {
         source: 'threats',
         filter: ['!', ['has', 'point_count']],
         paint: {
-          'circle-color': [
-            'step', ['get', 'max_score'],
-            '#3b82f6', 50,
-            '#f59e0b', 70,
-            '#ef4444', 85,
-            '#991b1b',
-          ],
+          'circle-color': SCORE_STEP,
           'circle-radius': ['interpolate', ['linear'], ['get', 'count'], 1, 6, 50, 12, 200, 18],
           'circle-opacity': 0.85,
           'circle-stroke-width': 1,
@@ -415,7 +424,7 @@ export default function ThreatMap({ maxFilterDays, flyTo, onFlyToDone }) {
       const row = el('div', 'flex items-center gap-1')
       row.appendChild(el('span', 'opacity-50 w-10', 'Score'))
       const scoreEl = el('span', 'font-semibold', String(score))
-      scoreEl.style.color = score >= 85 ? '#ef4444' : score >= 70 ? '#f59e0b' : '#3b82f6'
+      scoreEl.style.color = (THREAT_LEVELS.find(t => score >= t.min) ?? THREAT_LEVELS[THREAT_LEVELS.length - 1]).hex
       row.appendChild(scoreEl)
       popupRoot.appendChild(row)
     }
@@ -490,25 +499,6 @@ export default function ThreatMap({ maxFilterDays, flyTo, onFlyToDone }) {
 
         {/* Filter content — always visible on desktop, collapsible on mobile */}
         <div id="threat-filters-panel" className={`${filtersExpanded ? 'flex' : 'hidden'} lg:flex items-center gap-3 px-4 py-2.5 flex-wrap`}>
-          {/* Time range */}
-          <div className="flex items-center gap-0.5">
-            {visibleRanges.map(tr => (
-              <button
-                type="button"
-                key={tr}
-                onClick={() => setTimeRange(tr)}
-                aria-pressed={timeRange === tr}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
-                  timeRange === tr ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'
-                }`}
-              >
-                {tr}
-              </button>
-            ))}
-          </div>
-
-          <span className="text-gray-700">|</span>
-
           {/* Mode toggle */}
           <div className="flex items-center gap-0.5">
             {MODES.map(m => (
@@ -541,6 +531,25 @@ export default function ThreatMap({ maxFilterDays, flyTo, onFlyToDone }) {
                 }`}
               >
                 {v.label}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-gray-700">|</span>
+
+          {/* Time range */}
+          <div className="flex items-center gap-0.5">
+            {visibleRanges.map(tr => (
+              <button
+                type="button"
+                key={tr}
+                onClick={() => setTimeRange(tr)}
+                aria-pressed={timeRange === tr}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                  timeRange === tr ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                {tr}
               </button>
             ))}
           </div>
@@ -579,17 +588,35 @@ export default function ThreatMap({ maxFilterDays, flyTo, onFlyToDone }) {
             </div>
           )}
 
-          {/* Legend */}
+          {/* Legend — context-aware for heatmap vs clusters */}
           {geoData?.features?.length > 0 && (
             <div className="absolute bottom-6 left-4 z-10 bg-gray-950/90 border border-gray-800 rounded-lg px-3 py-2">
-              <div className="text-[10px] text-white/70 uppercase tracking-wider mb-1.5">Threat Score</div>
-              <div className="flex items-center gap-2 text-[10px] text-white/90">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> &lt;50</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> 50-70</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> 70-85</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-900 inline-block" /> 85+</span>
-              </div>
-              {view === 'heatmap' && <div className="text-[10px] text-white/50 mt-1">Glow size = event count</div>}
+              {view === 'heatmap' ? (
+                <>
+                  <div className="text-[10px] text-white/70 uppercase tracking-wider mb-1.5">Event Density</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2 w-28 rounded-full" style={{
+                      background: 'linear-gradient(to right, rgba(250,204,21,0.3), #facc15, #f59e0b, #ef4444, #991b1b)',
+                    }} />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-white/50 mt-0.5 w-28">
+                    <span>Fewer</span><span>More</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] text-white/70 uppercase tracking-wider mb-1.5">Threat Score</div>
+                  <div className="flex items-center gap-2 text-[10px] text-white/90 flex-wrap">
+                    {[...THREAT_LEVELS].reverse().map(t => (
+                      <span key={t.label} className="flex items-center gap-1">
+                        <span className={`w-2.5 h-2.5 rounded-full ${t.dot} inline-block`} />
+                        {t.label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-white/50 mt-1">Circle size = event count</div>
+                </>
+              )}
             </div>
           )}
         </div>

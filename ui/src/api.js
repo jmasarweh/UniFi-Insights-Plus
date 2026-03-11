@@ -293,7 +293,18 @@ export async function bulkUpdateFirewallLoggingStream(policies, onProgress) {
 
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      buffer += decoder.decode()
+      const trailing = buffer.replace(/^data: /, '').trim()
+      if (trailing) {
+        try {
+          const msg = JSON.parse(trailing)
+          if (msg.event === 'complete') finalResult = msg
+          else if (msg.event === 'error') throw new Error(msg.detail || 'Bulk update failed')
+        } catch (e) { if (!(e instanceof SyntaxError)) throw e }
+      }
+      break
+    }
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n\n')
     buffer = lines.pop()

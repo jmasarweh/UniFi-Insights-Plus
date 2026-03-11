@@ -295,6 +295,61 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# ── Device-name SQL fragments ────────────────────────────────────────────────
+
+def device_name_client_lateral(ip_expr: str, alias: str = 'c', recency_expr: Optional[str] = None) -> str:
+    """LATERAL join for latest unifi_clients row by IP.
+
+    ip_expr: trusted SQL column reference (e.g. 'page.dst_ip', 't.src_ip').
+             Interpolated directly into SQL — must never come from user input.
+    recency_expr: optional SQL param/expr for recency guard (e.g. '%s').
+    Returns SQL fragment: LEFT JOIN LATERAL (...) <alias> ON true
+    """
+    recency = f" AND last_seen >= {recency_expr} - INTERVAL '1 day'" if recency_expr else ""
+    return (f"LEFT JOIN LATERAL ("
+            f"    SELECT device_name, hostname, oui"
+            f"    FROM unifi_clients WHERE ip = {ip_expr}{recency}"
+            f"    ORDER BY last_seen DESC NULLS LAST LIMIT 1"
+            f") {alias} ON true")
+
+
+def device_name_device_lateral(ip_expr: str, alias: str = 'd') -> str:
+    """LATERAL join for latest unifi_devices row by IP.
+
+    ip_expr: trusted SQL column reference — interpolated directly, never from user input.
+    Returns SQL fragment: LEFT JOIN LATERAL (...) <alias> ON true
+    """
+    return (f"LEFT JOIN LATERAL ("
+            f"    SELECT device_name, model"
+            f"    FROM unifi_devices WHERE ip = {ip_expr}"
+            f"    ORDER BY updated_at DESC NULLS LAST LIMIT 1"
+            f") {alias} ON true")
+
+
+def device_name_coalesce(
+    client_alias: str = 'c',
+    device_alias: Optional[str] = None,
+    column_alias: str = 'device_name',
+    existing_expr: Optional[str] = None,
+) -> str:
+    """COALESCE expression for device name resolution.
+
+    client_alias: alias for unifi_clients LATERAL (columns: device_name, hostname, oui).
+    device_alias: alias for unifi_devices LATERAL (columns: device_name, model). Optional.
+    existing_expr: SQL expression to prefer over lookups (e.g. 'page.src_device_name').
+    Returns SQL expression for use in SELECT clauses.
+    """
+    parts = []
+    if existing_expr:
+        parts.append(existing_expr)
+    parts.extend([
+        f"{client_alias}.device_name", f"{client_alias}.hostname", f"{client_alias}.oui",
+    ])
+    if device_alias:
+        parts.extend([f"{device_alias}.device_name", f"{device_alias}.model"])
+    return f"COALESCE({', '.join(parts)}) AS {column_alias}"
+
+
 # ── Saved view filter validation ─────────────────────────────────────────────
 
 # Canonical dimension set — single source of truth for flows + saved view validation

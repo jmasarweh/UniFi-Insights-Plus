@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey'
 import { fetchFlowGraph } from '../api'
 import { formatNumber, formatServiceName, getInterfaceName } from '../utils'
+import NetworkBadge from './NetworkBadge'
 import FullscreenToggle from './FullscreenToggle'
 import InfoTooltip from './InfoTooltip'
 import KebabMenu, { SaveLoadMenuItems } from './KebabMenu'
@@ -325,15 +326,7 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
                       {deviceName}
                     </span>
                   )}
-                  {vlan != null ? (
-                    <span className="text-[10px] font-medium whitespace-nowrap px-1 py-0 rounded bg-violet-500/15 text-violet-400 border border-violet-500/30 shrink-0">
-                      VLAN {vlan}
-                    </span>
-                  ) : vpnBadge ? (
-                    <span className="text-[10px] font-medium whitespace-nowrap px-1 py-0 rounded bg-teal-500/15 text-teal-400 border border-teal-500/30 shrink-0">
-                      {vpnBadge}
-                    </span>
-                  ) : null}
+                  <NetworkBadge vlan={vlan} vpnBadge={vpnBadge} className="font-medium whitespace-nowrap" />
                 </div>
               )}
               <span className="text-[12px] font-mono text-gray-500 whitespace-nowrap">
@@ -475,7 +468,15 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
       {/* Chart — scrollable vertically and horizontally (originally vertical-only; horizontal added for mobile) */}
       <div className="relative p-3 overflow-y-auto overflow-x-auto min-h-0 flex-1" ref={containerRef}>
         {loading ? (
-          <div className="flex items-center justify-center h-48 text-xs text-gray-500">Loading flow data...</div>
+          <div className="animate-pulse space-y-3 p-4">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <div className="h-4 bg-gray-800 rounded flex-1" />
+                <div className="h-4 bg-gray-800 rounded w-24" />
+                <div className="h-4 bg-gray-800 rounded flex-1" />
+              </div>
+            ))}
+          </div>
         ) : error ? (
           <div className="flex items-center justify-center h-48 text-xs text-red-400">{error}</div>
         ) : !layout ? (

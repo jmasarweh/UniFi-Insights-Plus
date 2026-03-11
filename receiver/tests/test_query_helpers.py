@@ -7,6 +7,9 @@ from query_helpers import (
     _parse_negation,
     _parse_port,
     build_log_query,
+    device_name_client_lateral,
+    device_name_coalesce,
+    device_name_device_lateral,
     validate_time_params,
     validate_view_filters,
 )
@@ -234,3 +237,82 @@ class TestValidateViewFilters:
     def test_invalid_time_range(self):
         f = {**self.VALID, 'timeRange': 'bad'}
         assert 'timeRange' in validate_view_filters(f)
+
+
+# ── device_name_client_lateral ──────────────────────────────────────────────
+
+class TestDeviceNameClientLateral:
+    def test_basic_lateral(self):
+        sql = device_name_client_lateral('t.src_ip')
+        assert 'LEFT JOIN LATERAL' in sql
+        assert 'unifi_clients' in sql
+        assert 'ip = t.src_ip' in sql
+        assert 'ORDER BY last_seen DESC NULLS LAST LIMIT 1' in sql
+        assert ') c ON true' in sql
+
+    def test_custom_alias(self):
+        sql = device_name_client_lateral('t.dst_ip', alias='c2')
+        assert ') c2 ON true' in sql
+        assert 'ip = t.dst_ip' in sql
+
+    def test_recency_expr(self):
+        sql = device_name_client_lateral('t.src_ip', recency_expr='%s')
+        assert "last_seen >= %s - INTERVAL '1 day'" in sql
+
+    def test_no_recency_by_default(self):
+        sql = device_name_client_lateral('t.src_ip')
+        assert "last_seen >=" not in sql
+
+    def test_selects_name_hostname_oui(self):
+        sql = device_name_client_lateral('x.ip')
+        assert 'SELECT device_name, hostname, oui' in sql
+
+
+# ── device_name_device_lateral ──────────────────────────────────────────────
+
+class TestDeviceNameDeviceLateral:
+    def test_basic_lateral(self):
+        sql = device_name_device_lateral('t.src_ip')
+        assert 'LEFT JOIN LATERAL' in sql
+        assert 'unifi_devices' in sql
+        assert 'ip = t.src_ip' in sql
+        assert 'ORDER BY updated_at DESC NULLS LAST LIMIT 1' in sql
+        assert ') d ON true' in sql
+
+    def test_custom_alias(self):
+        sql = device_name_device_lateral('t.ip', alias='d2')
+        assert ') d2 ON true' in sql
+
+    def test_selects_name_and_model(self):
+        sql = device_name_device_lateral('x.ip')
+        assert 'SELECT device_name, model' in sql
+
+
+# ── device_name_coalesce ────────────────────────────────────────────────────
+
+class TestDeviceNameCoalesce:
+    def test_client_only(self):
+        sql = device_name_coalesce()
+        assert sql == 'COALESCE(c.device_name, c.hostname, c.oui) AS device_name'
+
+    def test_client_and_device(self):
+        sql = device_name_coalesce(device_alias='d')
+        assert sql == 'COALESCE(c.device_name, c.hostname, c.oui, d.device_name, d.model) AS device_name'
+
+    def test_custom_aliases(self):
+        sql = device_name_coalesce(client_alias='c2', device_alias='d2', column_alias='src_name')
+        assert 'c2.device_name' in sql
+        assert 'd2.device_name' in sql
+        assert 'AS src_name' in sql
+
+    def test_existing_expr_first(self):
+        sql = device_name_coalesce(existing_expr='page.src_device_name')
+        assert sql.startswith('COALESCE(page.src_device_name, c.device_name')
+
+    def test_existing_expr_with_device_alias(self):
+        sql = device_name_coalesce(existing_expr='page.dst_device_name', device_alias='d')
+        parts = sql.split('COALESCE(')[1].split(')')[0].split(', ')
+        assert parts[0] == 'page.dst_device_name'
+        assert parts[1] == 'c.device_name'
+        assert 'd.device_name' in parts
+        assert 'd.model' in parts

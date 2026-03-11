@@ -1,14 +1,13 @@
 """AbuseIPDB status and manual enrichment endpoints."""
 
 import ipaddress
-import json
 import logging
 import time
 
 from fastapi import APIRouter, HTTPException
 
 from db import get_config, get_wan_ips_from_config
-from enrichment import is_public_ip
+from enrichment import is_public_ip, get_abuseipdb_stats
 from deps import abuseipdb, enricher_db
 
 logger = logging.getLogger('api.abuseipdb')
@@ -18,28 +17,7 @@ router = APIRouter()
 
 @router.get("/api/abuseipdb/status")
 def abuseipdb_status():
-    stats = None
-    try:
-        with open('/tmp/abuseipdb_stats.json') as f:
-            stats = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    # Fallback: tmp file missing, corrupt, or lacks useful data
-    if not stats or stats.get('limit') is None:
-        try:
-            db_stats = get_config(enricher_db, 'abuseipdb_rate_limit')
-            if db_stats:
-                paused = db_stats.get('paused_until')
-                pause_active = False
-                if paused:
-                    try:
-                        pause_active = time.time() < float(paused)
-                    except (ValueError, TypeError):
-                        pass
-                if db_stats.get('limit') is not None or pause_active:
-                    stats = db_stats
-        except Exception:
-            pass
+    stats = get_abuseipdb_stats(enricher_db)
     if not stats:
         return {"remaining": None, "limit": None}
     reset_at = stats.get('reset_at')
@@ -77,29 +55,8 @@ def enrich_ip(ip: str):
     if not abuseipdb.enabled:
         raise HTTPException(status_code=400, detail="AbuseIPDB not configured")
 
-    # Budget check: use shared stats file as source of truth
-    budget_stats = None
-    try:
-        with open('/tmp/abuseipdb_stats.json') as f:
-            budget_stats = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    # Fallback: tmp file missing, corrupt, or lacks useful data
-    if not budget_stats or budget_stats.get('limit') is None:
-        try:
-            db_stats = get_config(enricher_db, 'abuseipdb_rate_limit')
-            if db_stats:
-                paused = db_stats.get('paused_until')
-                pause_active = False
-                if paused:
-                    try:
-                        pause_active = time.time() < float(paused)
-                    except (ValueError, TypeError):
-                        pass
-                if db_stats.get('limit') is not None or pause_active:
-                    budget_stats = db_stats
-        except Exception:
-            pass
+    # Budget check: use centralized AbuseIPDB stats from enricher DB
+    budget_stats = get_abuseipdb_stats(enricher_db)
     if budget_stats:
         # Block if actively paused (429 back-off)
         paused_until = budget_stats.get('paused_until')

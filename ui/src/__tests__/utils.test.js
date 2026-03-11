@@ -3,6 +3,7 @@ import {
   formatNumber,
   formatServiceName,
   isPrivateIP,
+  normalizeRuleDesc,
   resolveIpSublines,
   validateInterfaceName,
   getInterfaceColor,
@@ -245,5 +246,37 @@ describe('decodeThreatCategories', () => {
 
   it('falls back for unknown codes', () => {
     expect(decodeThreatCategories([999])).toBe('Cat 999')
+  })
+})
+
+
+describe('normalizeRuleDesc', () => {
+  it('adds space after ] when missing', () => {
+    expect(normalizeRuleDesc('[WAN_LOCAL]Allow All')).toBe('[WAN_LOCAL] Allow All')
+  })
+
+  it('preserves existing space after ]', () => {
+    expect(normalizeRuleDesc('[WAN_LOCAL] Allow All')).toBe('[WAN_LOCAL] Allow All')
+  })
+
+  it('handles multiple ] without space (global flag)', () => {
+    expect(normalizeRuleDesc('[A]foo [B]bar')).toBe('[A] foo [B] bar')
+  })
+
+  it('returns null for falsy input', () => {
+    expect(normalizeRuleDesc(null)).toBeNull()
+    expect(normalizeRuleDesc('')).toBeNull()
+    expect(normalizeRuleDesc(undefined)).toBeNull()
+  })
+
+  it('returns unchanged string when no ] present', () => {
+    expect(normalizeRuleDesc('Allow All Traffic')).toBe('Allow All Traffic')
+  })
+
+  it('handles ] at end of string (no char after)', () => {
+    // ] at end has no following char, so no space needed — regex (?!\s) still matches
+    // but there's nothing after to separate, so result just has trailing space
+    const result = normalizeRuleDesc('[WAN]')
+    expect(result).toBe('[WAN] ')
   })
 })

@@ -13,8 +13,10 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config, get_wan_ips_from_config
 from deps import get_conn, put_conn, enricher_db
-from parsers import build_vpn_cidr_map, match_vpn_ip
-from query_helpers import parse_time_range, build_log_query, validate_time_params, VALID_TIME_RANGES
+from ip_identity import load_identity_config, annotate_record, annotate_ip
+from query_helpers import (parse_time_range, build_log_query, validate_time_params,
+                          VALID_TIME_RANGES, device_name_client_lateral,
+                          device_name_device_lateral, device_name_coalesce)
 
 logger = logging.getLogger('api.stats')
 
@@ -117,9 +119,7 @@ def get_stats(
                 "FROM logs "
                 "WHERE timestamp >= %s AND rule_action = 'block' AND src_ip IS NOT NULL "
                 "AND host(src_ip) != ALL(%s) "
-                "AND NOT (src_ip << '10.0.0.0/8' OR src_ip << '172.16.0.0/12' "
-                "    OR src_ip << '192.168.0.0/16' OR src_ip << '127.0.0.0/8' "
-                "    OR src_ip << 'fe80::/10' OR src_ip << 'fc00::/7') "
+                "AND is_public_inet(src_ip) "
                 "GROUP BY src_ip ORDER BY count DESC LIMIT 10",
                 [cutoff, exclude_ips]
             )
@@ -132,17 +132,12 @@ def get_stats(
                 "  SELECT src_ip, host(src_ip) as ip, COUNT(*) as count "
                 "  FROM logs "
                 "  WHERE timestamp >= %s AND rule_action = 'block' AND src_ip IS NOT NULL "
-                "  AND (src_ip << '10.0.0.0/8' OR src_ip << '172.16.0.0/12' "
-                "      OR src_ip << '192.168.0.0/16') "
+                "  AND NOT is_public_inet(src_ip) "
                 "  GROUP BY src_ip ORDER BY count DESC LIMIT 10"
-                ") SELECT t.ip, t.count, c.device_name "
+                ") SELECT t.ip, t.count, "
+                + device_name_coalesce('c', column_alias='device_name') + " "
                 "FROM top_ips t "
-                "LEFT JOIN LATERAL ("
-                "    SELECT COALESCE(device_name, hostname, oui) as device_name "
-                "    FROM unifi_clients "
-                "    WHERE ip = t.src_ip AND last_seen >= %s - INTERVAL '1 day' "
-                "    ORDER BY last_seen DESC NULLS LAST LIMIT 1"
-                ") c ON true "
+                + device_name_client_lateral('t.src_ip', 'c', recency_expr='%s') + " "
                 "ORDER BY t.count DESC",
                 [cutoff, cutoff]
             )
@@ -243,12 +238,7 @@ def get_stats(
                 "FROM logs "
                 "WHERE timestamp >= %s AND rule_action = 'allow' AND dst_ip IS NOT NULL "
                 "AND host(dst_ip) != ALL(%s) "
-                "AND NOT (dst_ip << '10.0.0.0/8' OR dst_ip << '172.16.0.0/12' "
-                "    OR dst_ip << '192.168.0.0/16' OR dst_ip << '127.0.0.0/8' "
-                "    OR dst_ip << '0.0.0.0/8' OR dst_ip << '169.254.0.0/16' "
-                "    OR dst_ip << '224.0.0.0/4' OR dst_ip << '240.0.0.0/4' "
-                "    OR dst_ip << 'fe80::/10' OR dst_ip << 'fc00::/7' "
-                "    OR dst_ip << 'ff00::/8' OR dst_ip << '::1/128') "
+                "AND is_public_inet(dst_ip) "
                 "GROUP BY dst_ip ORDER BY count DESC LIMIT 10",
                 [cutoff, exclude_ips]
             )
@@ -283,34 +273,27 @@ def get_stats(
                 "  SELECT src_ip, host(src_ip) as ip, COUNT(*) as count "
                 "  FROM logs "
                 "  WHERE timestamp >= %s AND rule_action = 'allow' AND src_ip IS NOT NULL "
-                "  AND (src_ip << '10.0.0.0/8' OR src_ip << '172.16.0.0/12' "
-                "      OR src_ip << '192.168.0.0/16') "
+                "  AND NOT is_public_inet(src_ip) "
                 + gw_filter +
                 "  GROUP BY src_ip ORDER BY count DESC LIMIT 10"
-                ") SELECT t.ip, t.count, c.device_name "
+                ") SELECT t.ip, t.count, "
+                + device_name_coalesce('c', column_alias='device_name') + " "
                 "FROM top_ips t "
-                "LEFT JOIN LATERAL ("
-                "    SELECT COALESCE(device_name, hostname, oui) as device_name "
-                "    FROM unifi_clients "
-                "    WHERE ip = t.src_ip AND last_seen >= %s - INTERVAL '1 day' "
-                "    ORDER BY last_seen DESC NULLS LAST LIMIT 1"
-                ") c ON true "
+                + device_name_client_lateral('t.src_ip', 'c', recency_expr='%s') + " "
                 "ORDER BY t.count DESC",
                 params
             )
             top_active_internal_ips = [dict(r) for r in cur.fetchall()]
 
-            # Annotate gateway/WAN IPs with device names
-            gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
-            wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
+            # Annotate gateway/WAN/VPN IPs with device names
+            cfg = load_identity_config(enricher_db)
             for ip_list in (top_blocked_internal_ips, top_active_internal_ips):
                 for item in ip_list:
-                    if not item.get('device_name'):
-                        if item['ip'] in gateway_vlans:
-                            item['device_name'] = 'Gateway'
-                            item['vlan'] = gateway_vlans[item['ip']].get('vlan')
-                        elif item['ip'] in wan_ip_names:
-                            item['device_name'] = wan_ip_names[item['ip']]
+                    name, vlan, _ = annotate_ip(cfg, item['ip'], item.get('device_name'))
+                    if name and not item.get('device_name'):
+                        item['device_name'] = name
+                    if vlan is not None:
+                        item['vlan'] = vlan
 
         conn.commit()
         return {
@@ -398,29 +381,13 @@ def get_ip_pairs(
         host(p.src_ip) AS src_ip, host(p.dst_ip) AS dst_ip,
         p.dst_port, p.protocol, p.service_name,
         p.total_count, p.allow_count, p.block_count, p.max_threat_score, p.asn_name, p.direction,
-        COALESCE(cs.device_name, ds.device_name) AS src_device_name,
-        COALESCE(cd.device_name, dd.device_name) AS dst_device_name
+        """ + device_name_coalesce('cs', 'ds', 'src_device_name') + """,
+        """ + device_name_coalesce('cd', 'dd', 'dst_device_name') + """
     FROM pair_counts p
-    LEFT JOIN LATERAL (
-        SELECT COALESCE(device_name, hostname, oui) AS device_name
-        FROM unifi_clients WHERE ip = p.src_ip
-        ORDER BY last_seen DESC NULLS LAST LIMIT 1
-    ) cs ON true
-    LEFT JOIN LATERAL (
-        SELECT COALESCE(device_name, model) AS device_name
-        FROM unifi_devices WHERE ip = p.src_ip
-        ORDER BY updated_at DESC NULLS LAST LIMIT 1
-    ) ds ON true
-    LEFT JOIN LATERAL (
-        SELECT COALESCE(device_name, hostname, oui) AS device_name
-        FROM unifi_clients WHERE ip = p.dst_ip
-        ORDER BY last_seen DESC NULLS LAST LIMIT 1
-    ) cd ON true
-    LEFT JOIN LATERAL (
-        SELECT COALESCE(device_name, model) AS device_name
-        FROM unifi_devices WHERE ip = p.dst_ip
-        ORDER BY updated_at DESC NULLS LAST LIMIT 1
-    ) dd ON true
+    """ + device_name_client_lateral('p.src_ip', 'cs') + """
+    """ + device_name_device_lateral('p.src_ip', 'ds') + """
+    """ + device_name_client_lateral('p.dst_ip', 'cd') + """
+    """ + device_name_device_lateral('p.dst_ip', 'dd') + """
     ORDER BY p.total_count DESC
     """
     params.append(limit)
@@ -431,29 +398,10 @@ def get_ip_pairs(
             cur.execute(sql, params)
             pairs = [dict(r) for r in cur.fetchall()]
 
-        # Enrich with gateway + WAN device names (matches Sankey/Log Stream)
-        gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
-        wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
-
-        # VPN badges
-        vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-        vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
-        exclude_ips = set(wan_ip_names.keys()) | set(gateway_vlans.keys())
-
+        # Enrich with gateway + WAN + VPN device names
+        cfg = load_identity_config(enricher_db)
         for pair in pairs:
-            for prefix in ('src', 'dst'):
-                ip_str = pair.get(f'{prefix}_ip', '')
-                name_key = f'{prefix}_device_name'
-                if not pair.get(name_key):
-                    if ip_str in gateway_vlans:
-                        pair[name_key] = 'Gateway'
-                    elif ip_str in wan_ip_names:
-                        pair[name_key] = wan_ip_names[ip_str]
-                # VPN device name (e.g. "Teleport", "WireGuard Server")
-                if vpn_cidrs and not pair.get(name_key):
-                    vpn_result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
-                    if vpn_result:
-                        pair[name_key] = vpn_result[1]
+            annotate_record(cfg, pair)
 
         conn.commit()
         return {"pairs": pairs}

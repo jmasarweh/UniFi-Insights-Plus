@@ -37,6 +37,44 @@ def is_public_ip(ip_str: str) -> bool:
         return False
 
 
+# ── AbuseIPDB stats retrieval ────────────────────────────────────────────────
+
+def get_abuseipdb_stats(db):
+    """Load AbuseIPDB rate-limit state from tmp file with DB fallback.
+
+    Read order:
+      1. /tmp/abuseipdb_stats.json  (written by receiver process each API call)
+      2. system_config.abuseipdb_rate_limit  (persisted by enricher on shutdown)
+
+    Returns dict with keys: limit, remaining, reset_at, paused_until, quota_reset_pending
+    or None if no stats are available.
+    """
+    from db import get_config
+
+    stats = None
+    try:
+        with open('/tmp/abuseipdb_stats.json', 'r') as f:
+            stats = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    if not stats or stats.get('limit') is None:
+        try:
+            db_stats = get_config(db, 'abuseipdb_rate_limit')
+            if db_stats:
+                paused = db_stats.get('paused_until')
+                pause_active = False
+                if paused:
+                    try:
+                        pause_active = time.time() < float(paused)
+                    except (ValueError, TypeError):
+                        pass
+                if db_stats.get('limit') is not None or pause_active:
+                    stats = db_stats
+        except Exception as e:
+            logger.debug("Failed to read AbuseIPDB stats from DB: %s", e)
+    return stats
+
+
 # ── Thread-safe cache ─────────────────────────────────────────────────────────
 
 class TTLCache:
@@ -576,6 +614,7 @@ class Enricher:
         elif src_remote and dst_remote:
             ip_to_enrich = src_ip
 
+        parsed['remote_ip'] = ip_to_enrich
         if not ip_to_enrich:
             return parsed
 

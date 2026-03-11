@@ -1,15 +1,14 @@
 """Health check endpoint."""
 
-import json
 import logging
 import os
 import shutil
-import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
 from db import get_config, is_external_db
+from enrichment import get_abuseipdb_stats
 from deps import get_conn, put_conn, enricher_db, APP_VERSION
 
 logger = logging.getLogger('api.health')
@@ -38,28 +37,7 @@ def health():
                 retention_days = 60
 
         # AbuseIPDB rate limit stats (written by receiver process)
-        abuseipdb = None
-        try:
-            with open('/tmp/abuseipdb_stats.json', 'r') as f:
-                abuseipdb = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-        # Fallback: tmp file missing, corrupt, or lacks useful data
-        if not abuseipdb or abuseipdb.get('limit') is None:
-            try:
-                db_stats = get_config(enricher_db, 'abuseipdb_rate_limit')
-                if db_stats:
-                    paused = db_stats.get('paused_until')
-                    pause_active = False
-                    if paused:
-                        try:
-                            pause_active = time.time() < float(paused)
-                        except (ValueError, TypeError):
-                            pass
-                    if db_stats.get('limit') is not None or pause_active:
-                        abuseipdb = db_stats
-            except Exception:
-                pass
+        abuseipdb = get_abuseipdb_stats(enricher_db)
 
         # MaxMind database info
         maxmind_last_update = None

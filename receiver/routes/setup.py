@@ -78,21 +78,13 @@ def network_segments(wan_interfaces: Optional[str] = None):
                     FROM logs
                     WHERE log_type = 'firewall'
                       AND interface_in IS NOT NULL
-                      AND (src_ip << '10.0.0.0/8'::inet
-                           OR src_ip << '172.16.0.0/12'::inet
-                           OR src_ip << '192.168.0.0/16'::inet
-                           OR src_ip << 'fc00::/7'::inet
-                           OR src_ip << 'fe80::/10'::inet)
+                      AND NOT is_public_inet(src_ip)
                     UNION
                     SELECT interface_out as iface, dst_ip as src_ip
                     FROM logs
                     WHERE log_type = 'firewall'
                       AND interface_out IS NOT NULL
-                      AND (dst_ip << '10.0.0.0/8'::inet
-                           OR dst_ip << '172.16.0.0/12'::inet
-                           OR dst_ip << '192.168.0.0/16'::inet
-                           OR dst_ip << 'fc00::/7'::inet
-                           OR dst_ip << 'fe80::/10'::inet)
+                      AND NOT is_public_inet(dst_ip)
                 )
                 SELECT
                     iface,

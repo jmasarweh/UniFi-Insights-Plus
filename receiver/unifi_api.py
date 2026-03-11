@@ -894,7 +894,7 @@ class UniFiAPI:
                     errors.append({'id': result['id'], 'error': result['error']})
                 if progress_callback:
                     try:
-                        progress_callback(success + failed, work_total, success, failed)
+                        progress_callback(success + failed, work_total, success, failed, phase='patching')
                     except Exception:
                         logger.debug("progress_callback failed during patching", exc_info=True)
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { fetchLogsBatch } from '../api'
-import { FlagIcon, decodeThreatCategories, getInterfaceName, formatServiceName } from '../utils'
+import { FlagIcon, decodeThreatCategories, getInterfaceName, formatServiceName, normalizeRuleDesc } from '../utils'
+import { getThreatLevel } from '../lib/threatPresentation'
 
 const ACTION_STYLES = {
   block: 'text-red-400',
@@ -9,13 +10,9 @@ const ACTION_STYLES = {
 }
 
 function ThreatBadge({ score }) {
-  if (score == null) return null
-  let color = 'text-emerald-400'
-  if (score >= 75) color = 'text-red-400'
-  else if (score >= 50) color = 'text-orange-400'
-  else if (score >= 25) color = 'text-yellow-400'
-  else if (score > 0) color = 'text-blue-400'
-  return <span className={`${color} font-medium`}>{score}</span>
+  const level = getThreatLevel(score)
+  if (!level) return null
+  return <span className={`${level.color} font-medium`}>{score}</span>
 }
 
 function Section({ title, open, onToggle, children }) {
@@ -46,7 +43,7 @@ function Row({ label, value }) {
 }
 
 function LogEntry({ log, onSelect }) {
-  const remote = log.direction === 'inbound' ? log.src_ip : (log.dst_ip || log.src_ip)
+  const remote = log.remote_ip || (log.direction === 'inbound' ? log.src_ip : (log.dst_ip || log.src_ip))
   const device = log.direction === 'inbound'
     ? (log.src_device_name || log.rdns || remote)
     : (log.dst_device_name || log.rdns || remote)
@@ -103,7 +100,7 @@ function LogDetailPanel({ log }) {
             <span className={ACTION_STYLES[log.rule_action] || ''}>{log.rule_action || '—'}</span>
           } />
           {log.service_name && <Row label="Service" value={formatServiceName(log.service_name)} />}
-          {log.rule_desc && <Row label="Policy" value={log.rule_desc.replace(/\](?!\s)/, '] ')} />}
+          {log.rule_desc && <Row label="Policy" value={normalizeRuleDesc(log.rule_desc)} />}
           <Row label="Direction" value={log.direction} />
         </div>
       )}

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import queue
 import threading
 
 import requests as _requests
@@ -299,8 +300,6 @@ def bulk_update_logging_stream(body: dict):
         raise HTTPException(status_code=400, detail="policies list is required")
 
     def _event_stream():
-        # Thread-safe event queue for progress updates
-        import queue
         q = queue.Queue()
 
         def on_progress(completed, total, success, failed, phase='patching'):

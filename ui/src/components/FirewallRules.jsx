@@ -559,7 +559,7 @@ function BulkConfirmModal({ action, count, srcZone, dstZone, onConfirm, onCancel
   const verb = action === 'enable' ? 'Enable' : 'Disable'
   const isRunning = !!progress
 
-  const pct = progress ? Math.round((progress.completed / progress.total) * 100) : 0
+  const pct = progress && progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={isRunning ? undefined : onCancel}>
@@ -612,7 +612,7 @@ function BulkConfirmModal({ action, count, srcZone, dstZone, onConfirm, onCancel
             <div className="flex items-center justify-end gap-2 mt-2">
               <button
                 onClick={onCancel}
-                className="px-3.5 py-1.5 rounded text-[12px] font-medium text-[#cbced2] hover:text-[#f9fafa] border border-white/[0.07] hover:border-white/[0.15] transition-colors"
+                className="disable-logging-btn px-3.5 py-1.5 rounded text-[12px] font-medium text-[#cbced2] hover:text-[#f9fafa] border border-white/[0.07] hover:border-white/[0.15] transition-colors"
               >
                 Cancel
               </button>
@@ -777,6 +777,7 @@ export default function FirewallRules() {
     const controllable = filteredPolicies.filter(p =>
       p.metadata?.origin !== 'DERIVED' && p.enabled !== false
     )
+    // No controllable policies → both true so both buttons are disabled
     if (!controllable.length) return { allEnabled: true, allDisabled: true }
     return {
       allEnabled: controllable.every(p => p.loggingEnabled),
@@ -873,7 +874,23 @@ export default function FirewallRules() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <div className="text-center py-8 text-[#676f79] text-sm">Loading firewall rules...</div>
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="grid grid-cols-4 gap-2">
+          {[...Array(16)].map((_, i) => <div key={i} className="h-8 bg-gray-800 rounded" />)}
+        </div>
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-3 border border-gray-800 rounded">
+              <div className="h-4 w-4 bg-gray-800 rounded" />
+              <div className="h-3 bg-gray-800 rounded flex-1" />
+              <div className="h-3 bg-gray-800 rounded w-20" />
+              <div className="h-3 bg-gray-800 rounded w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (error && !data) {
@@ -891,7 +908,7 @@ export default function FirewallRules() {
 
   return (
     <div>
-      {/* Bulk confirm modal (also shows progress when running) */}
+      {/* Bulk confirm modal */}
       {(pendingBulk || bulkProgress) && (
         <BulkConfirmModal
           action={bulkAction || (pendingBulk?.enableAll ? 'enable' : 'disable')}

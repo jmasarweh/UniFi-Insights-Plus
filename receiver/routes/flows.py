@@ -10,8 +10,10 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config
 from deps import get_conn, put_conn, enricher_db
-from parsers import build_vpn_cidr_map, match_vpn_ip
-from query_helpers import build_log_query, validate_time_params, ALLOWED_DIMENSIONS
+from ip_identity import load_identity_config, annotate_ip
+from query_helpers import (build_log_query, validate_time_params, ALLOWED_DIMENSIONS,
+                          device_name_client_lateral, device_name_device_lateral,
+                          device_name_coalesce)
 
 logger = logging.getLogger('api.flows')
 
@@ -115,37 +117,20 @@ def _lookup_ip_info(conn, nodes):
                 if row['device_name']:
                     device_names[row['ip_str']] = row['device_name']
 
-    # Gateway VLAN badges from config
+    # Annotate from identity config (gateway, WAN, VPN)
     gateway_vlans = {}
-    gw_vlans_config = get_config(enricher_db, 'gateway_ip_vlans') or {}
+    vpn_badges = {}
+    cfg = load_identity_config(enricher_db)
     for ip_str in ip_set:
-        if ip_str in gw_vlans_config:
-            vlan = gw_vlans_config[ip_str].get('vlan')
-            if vlan is not None:
-                gateway_vlans[ip_str] = vlan
-            if not device_names.get(ip_str):
-                device_names[ip_str] = 'Gateway'
+        name, vlan, vpn_badge = annotate_ip(cfg, ip_str, device_names.get(ip_str))
+        if name and not device_names.get(ip_str):
+            device_names[ip_str] = name
+        if vlan is not None:
+            gateway_vlans[ip_str] = vlan
         elif ip_str in client_vlans:
             gateway_vlans[ip_str] = client_vlans[ip_str]
-
-    # WAN IP names
-    wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
-    for ip_str in ip_set:
-        if not device_names.get(ip_str) and ip_str in wan_ip_names:
-            device_names[ip_str] = wan_ip_names[ip_str]
-
-    # VPN badges from vpn_networks config
-    vpn_badges = {}
-    vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-    exclude_ips = set(wan_ip_names.keys()) | set(gw_vlans_config.keys())
-    vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
-    for ip_str in ip_set:
-        result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
-        if result:
-            badge, device_name = result
-            vpn_badges[ip_str] = badge
-            if not device_names.get(ip_str):
-                device_names[ip_str] = device_name
+        if vpn_badge:
+            vpn_badges[ip_str] = vpn_badge
 
     return device_names, gateway_vlans, vpn_badges
 
@@ -412,6 +397,16 @@ def get_host_detail(
                 device = cur.fetchone()
             device = dict(device) if device else {"device_name": None, "network": None, "vlan": None, "mac": None}
 
+            # Identity annotation (gateway/WAN/VPN) — identity vlan takes precedence; DB network preserved if set
+            cfg = load_identity_config(enricher_db)
+            name, vlan, vpn_badge = annotate_ip(cfg, ip, device.get('device_name'))
+            if name and not device.get('device_name'):
+                device['device_name'] = name
+            if vlan is not None:
+                device['vlan'] = vlan
+            if vpn_badge and not device.get('network'):
+                device['network'] = vpn_badge
+
             # 3. Top outbound peers (this IP as source)
             src_where = f"{where} AND src_ip = %s::inet"
             src_params = params + [ip]
@@ -448,14 +443,12 @@ def get_host_detail(
             all_peer_ips = list({p['peer_ip'] for p in peers_out_raw + peers_in_raw})
             peer_name_map = {}
             if all_peer_ips:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT host(p.ip) AS peer_ip,
-                           COALESCE(c.device_name, c.hostname, c.oui, d.device_name, d.model) AS device_name
+                           {device_name_coalesce('c', 'd')}
                     FROM unnest(%s::inet[]) AS p(ip)
-                    LEFT JOIN LATERAL (SELECT device_name, hostname, oui FROM unifi_clients
-                                       WHERE ip = p.ip ORDER BY last_seen DESC NULLS LAST LIMIT 1) c ON true
-                    LEFT JOIN LATERAL (SELECT device_name, model FROM unifi_devices
-                                       WHERE ip = p.ip ORDER BY updated_at DESC NULLS LAST LIMIT 1) d ON true
+                    {device_name_client_lateral('p.ip', 'c')}
+                    {device_name_device_lateral('p.ip', 'd')}
                 """, [all_peer_ips])
                 peer_name_map = {r['peer_ip']: r['device_name'] for r in cur.fetchall()}
             for peer in peers_out_raw + peers_in_raw:

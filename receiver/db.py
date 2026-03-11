@@ -141,6 +141,7 @@ INSERT_COLUMNS = [
     'abuse_total_reports', 'abuse_last_reported',
     'abuse_is_whitelisted', 'abuse_is_tor',
     'src_device_name', 'dst_device_name',
+    'remote_ip',
     'raw_log',
 ]
 
@@ -309,6 +310,7 @@ class Database:
             # Phase 2: Device name columns on logs
             "ALTER TABLE logs ADD COLUMN IF NOT EXISTS src_device_name TEXT",
             "ALTER TABLE logs ADD COLUMN IF NOT EXISTS dst_device_name TEXT",
+            "ALTER TABLE logs ADD COLUMN IF NOT EXISTS remote_ip INET",
             # Phase 2: UniFi client cache
             """CREATE TABLE IF NOT EXISTS unifi_clients (
                 mac             MACADDR PRIMARY KEY,
@@ -367,6 +369,17 @@ class Database:
                 RETURN deleted;
             END;
             $$ LANGUAGE plpgsql""",
+            # IP classification function — single source of truth for public/private
+            """CREATE OR REPLACE FUNCTION is_public_inet(addr inet) RETURNS boolean AS $$
+                SELECT addr IS NOT NULL
+                    AND NOT (
+                        addr << '10.0.0.0/8'
+                        OR addr << '172.16.0.0/12'
+                        OR addr << '192.168.0.0/16'
+                        OR addr << 'fc00::/7'
+                        OR addr << 'fe80::/10'
+                    )
+            $$ LANGUAGE sql IMMUTABLE""",
         ]
         # Fix function ownership BEFORE migrations so CREATE OR REPLACE
         # succeeds on the first boot after upgrade (not just the second).

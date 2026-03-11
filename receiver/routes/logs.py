@@ -13,36 +13,13 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config, get_wan_ips_from_config
 from deps import get_conn, put_conn, enricher_db, ttl_cache
-from parsers import build_vpn_cidr_map, match_vpn_ip
-from query_helpers import build_log_query, validate_time_params
+from ip_identity import load_identity_config, annotate_record, annotate_ip
+from query_helpers import (build_log_query, validate_time_params,
+                          device_name_client_lateral, device_name_device_lateral,
+                          device_name_coalesce)
 from services import get_service_description
 
 
-def _annotate_vpn_badges(logs, vpn_cidrs, exclude_ips=None):
-    """Annotate logs with VPN gateway badges and device type names.
-
-    Gateway IP (first in CIDR) → device_name='Gateway' + badge.
-    Other IPs in pool → device_name=VPN type name (e.g. 'WireGuard Server'), no badge.
-    """
-    if not vpn_cidrs:
-        return
-
-    for log in logs:
-        for prefix in ('src', 'dst'):
-            if log.get(f'{prefix}_device_vlan') is not None:
-                continue
-            if log.get(f'{prefix}_device_network'):
-                continue
-
-            ip_str = str(log.get(f'{prefix}_ip', '')).split('/')[0]
-            result = match_vpn_ip(ip_str, vpn_cidrs, exclude_ips)
-            if result:
-                badge, device_name = result
-                name_key = f'{prefix}_device_name'
-                if not log.get(name_key):
-                    log[name_key] = device_name
-                if device_name == 'Gateway':
-                    log[f'{prefix}_device_network'] = badge
 
 logger = logging.getLogger('api.logs')
 
@@ -109,26 +86,13 @@ def get_logs(
                         ORDER BY {sort_col} {sort_dir} LIMIT %s OFFSET %s
                     )
                     SELECT page.*,
-                        COALESCE(page.src_device_name,
-                            c1.device_name, c1.hostname, c1.oui,
-                            d1.device_name, d1.model) AS src_device_name,
-                        COALESCE(page.dst_device_name,
-                            c2.device_name, c2.hostname, c2.oui,
-                            d2.device_name, d2.model) AS dst_device_name
+                        {device_name_coalesce('c1', 'd1', 'src_device_name', 'page.src_device_name')},
+                        {device_name_coalesce('c2', 'd2', 'dst_device_name', 'page.dst_device_name')}
                     FROM page
                     LEFT JOIN unifi_clients c1 ON c1.mac = page.mac_address
-                    -- No recency filter: log queries resolve names across all time
-                    LEFT JOIN LATERAL (
-                        SELECT device_name, hostname, oui
-                        FROM unifi_clients WHERE ip = page.dst_ip
-                        ORDER BY last_seen DESC NULLS LAST LIMIT 1
-                    ) c2 ON true
+                    {device_name_client_lateral('page.dst_ip', 'c2')}
                     LEFT JOIN unifi_devices d1 ON d1.mac = page.mac_address
-                    LEFT JOIN LATERAL (
-                        SELECT device_name, model
-                        FROM unifi_devices WHERE ip = page.dst_ip
-                        ORDER BY updated_at DESC NULLS LAST LIMIT 1
-                    ) d2 ON true
+                    {device_name_device_lateral('page.dst_ip', 'd2')}
                     ORDER BY page.{sort_col} {sort_dir}""",
                 params + [per_page, offset]
             )
@@ -355,29 +319,17 @@ _LOG_DETAIL_SQL = """
                      CASE WHEN array_length(t2.threat_categories, 1) > 0 THEN t2.threat_categories END
             END
         ) as threat_categories,
-        COALESCE(l.src_device_name,
-            c1.device_name, c1.hostname, c1.oui,
-            d1.device_name, d1.model) as src_device_name,
-        COALESCE(l.dst_device_name,
-            c2.device_name, c2.hostname, c2.oui,
-            d2.device_name, d2.model) as dst_device_name
+        """ + device_name_coalesce('c1', 'd1', 'src_device_name', 'l.src_device_name') + """,
+        """ + device_name_coalesce('c2', 'd2', 'dst_device_name', 'l.dst_device_name') + """
     FROM logs l
     LEFT JOIN ip_threats t1 ON t1.ip = l.src_ip
         AND NOT (l.src_ip = ANY(%s::inet[]))
     LEFT JOIN ip_threats t2 ON t2.ip = l.dst_ip
         AND NOT (l.dst_ip = ANY(%s::inet[]))
     LEFT JOIN unifi_clients c1 ON c1.mac = l.mac_address
-    LEFT JOIN LATERAL (
-        SELECT device_name, hostname, oui
-        FROM unifi_clients WHERE ip = l.dst_ip
-        ORDER BY last_seen DESC NULLS LAST LIMIT 1
-    ) c2 ON true
+    """ + device_name_client_lateral('l.dst_ip', 'c2') + """
     LEFT JOIN unifi_devices d1 ON d1.mac = l.mac_address
-    LEFT JOIN LATERAL (
-        SELECT device_name, model
-        FROM unifi_devices WHERE ip = l.dst_ip
-        ORDER BY updated_at DESC NULLS LAST LIMIT 1
-    ) d2 ON true
+    """ + device_name_device_lateral('l.dst_ip', 'd2') + """
 """
 
 
@@ -387,7 +339,7 @@ def _serialize_log(row):
     for key in ('timestamp', 'created_at', 'abuse_last_reported'):
         if log.get(key):
             log[key] = log[key].isoformat()
-    for key in ('src_ip', 'dst_ip', 'mac_address'):
+    for key in ('src_ip', 'dst_ip', 'remote_ip', 'mac_address'):
         if log.get(key):
             log[key] = str(log[key])
     if log.get('geo_lat') is not None:
@@ -399,29 +351,12 @@ def _serialize_log(row):
 
 def _annotate_logs(logs):
     """Annotate logs with gateway/VPN device names and service descriptions."""
-    gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
-    wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
-    vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-    vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
-    exclude_ips = (set(wan_ip_names.keys()) | set(gateway_vlans.keys())) if vpn_cidrs else set()
-
+    cfg = load_identity_config(enricher_db)
     for log in logs:
-        for prefix in ('src', 'dst'):
-            name_key = f'{prefix}_device_name'
-            ip_str = str(log.get(f'{prefix}_ip', '')).split('/')[0]
-            if ip_str in gateway_vlans:
-                if not log.get(name_key):
-                    log[name_key] = 'Gateway'
-                log[f'{prefix}_device_vlan'] = gateway_vlans[ip_str].get('vlan')
-            elif not log.get(name_key) and ip_str in wan_ip_names:
-                log[name_key] = wan_ip_names[ip_str]
-
+        annotate_record(cfg, log)
         desc = get_service_description(log.get('dst_port'), log.get('protocol'))
         if desc:
             log['service_description'] = desc
-
-    if vpn_cidrs:
-        _annotate_vpn_badges(logs, vpn_cidrs, exclude_ips)
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -522,7 +457,7 @@ def export_csv_endpoint(
         'geo_country', 'geo_city', 'asn_name', 'threat_score',
         'threat_categories', 'rdns',
         'abuse_usage_type', 'abuse_total_reports', 'abuse_last_reported',
-        'abuse_is_tor',
+        'abuse_is_tor', 'remote_ip',
     ]
 
     # CSV header includes device name + VLAN + VPN network columns resolved via live JOIN
@@ -541,36 +476,20 @@ def export_csv_endpoint(
                         ORDER BY timestamp DESC LIMIT %s
                     )
                     SELECT {', '.join('f.' + c for c in export_columns)},
-                        COALESCE(f.src_device_name,
-                            c1.device_name, c1.hostname, c1.oui,
-                            d1.device_name, d1.model) AS src_device_name,
-                        COALESCE(f.dst_device_name,
-                            c2.device_name, c2.hostname, c2.oui,
-                            d2.device_name, d2.model) AS dst_device_name
+                        {device_name_coalesce('c1', 'd1', 'src_device_name', 'f.src_device_name')},
+                        {device_name_coalesce('c2', 'd2', 'dst_device_name', 'f.dst_device_name')}
                     FROM filtered f
                     LEFT JOIN unifi_clients c1 ON c1.mac = f.mac_address
-                    LEFT JOIN LATERAL (
-                        SELECT device_name, hostname, oui
-                        FROM unifi_clients WHERE ip = f.dst_ip
-                        ORDER BY last_seen DESC NULLS LAST LIMIT 1
-                    ) c2 ON true
+                    {device_name_client_lateral('f.dst_ip', 'c2')}
                     LEFT JOIN unifi_devices d1 ON d1.mac = f.mac_address
-                    LEFT JOIN LATERAL (
-                        SELECT device_name, model
-                        FROM unifi_devices WHERE ip = f.dst_ip
-                        ORDER BY updated_at DESC NULLS LAST LIMIT 1
-                    ) d2 ON true
+                    {device_name_device_lateral('f.dst_ip', 'd2')}
                     ORDER BY f.timestamp DESC""",
                 params + [limit]
             )
             rows = cur.fetchall()
 
         # Annotate gateway/WAN IPs and VPN badges in CSV rows
-        gateway_vlans = get_config(enricher_db, 'gateway_ip_vlans') or {}
-        wan_ip_names = get_config(enricher_db, 'wan_ip_names') or {}
-        vpn_networks = get_config(enricher_db, 'vpn_networks') or {}
-        vpn_cidrs = build_vpn_cidr_map(vpn_networks) if vpn_networks else []
-        csv_exclude_ips = set(wan_ip_names.keys()) | set(gateway_vlans.keys())
+        cfg = load_identity_config(enricher_db)
         src_ip_idx = export_columns.index('src_ip')
         dst_ip_idx = export_columns.index('dst_ip')
         src_name_idx = len(export_columns)      # first appended column
@@ -591,21 +510,13 @@ def export_csv_endpoint(
                 (dst_ip_idx, dst_name_idx, dst_vlan_idx, dst_net_idx),
             ]:
                 ip_str = str(row[ip_idx] or '').split('/')[0]
-                if not row[name_idx]:
-                    if ip_str in gateway_vlans:
-                        row[name_idx] = 'Gateway'
-                        row[vlan_idx] = gateway_vlans[ip_str].get('vlan')
-                    elif ip_str in wan_ip_names:
-                        row[name_idx] = wan_ip_names[ip_str]
-                # VPN annotation — same CIDR-based pattern as gateway/WAN
-                if row[vlan_idx] is None and row[net_idx] is None and vpn_cidrs:
-                    vpn_result = match_vpn_ip(ip_str, vpn_cidrs, csv_exclude_ips)
-                    if vpn_result:
-                        badge, device_name = vpn_result
-                        if not row[name_idx]:
-                            row[name_idx] = device_name
-                        if device_name == 'Gateway':
-                            row[net_idx] = badge
+                name, vlan, vpn_badge = annotate_ip(cfg, ip_str, row[name_idx])
+                if name and not row[name_idx]:
+                    row[name_idx] = name
+                if vlan is not None:
+                    row[vlan_idx] = vlan
+                if vpn_badge and name == 'Gateway':
+                    row[net_idx] = vpn_badge
             writer.writerow([str(v) if v is not None else '' for v in row])
 
         output.seek(0)

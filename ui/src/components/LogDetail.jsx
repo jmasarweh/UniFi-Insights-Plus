@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { FlagIcon, getInterfaceName, decodeThreatCategories, isPrivateIP, formatServiceName } from '../utils'
+import { FlagIcon, getInterfaceName, decodeThreatCategories, isPrivateIP, formatServiceName, normalizeRuleDesc } from '../utils'
+import { getThreatLevel } from '../lib/threatPresentation'
 import { fetchAbuseIPDBStatus, enrichIP } from '../api'
 import CopyButton from './CopyButton'
 
@@ -27,9 +28,10 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
   // Determine which IP to enrich — the remote party, not our infrastructure
   function getEnrichableIP() {
     if (!log) return null
+    if (log.remote_ip) return log.remote_ip
+    // Fallback for historical logs without remote_ip
     const srcPublic = log.src_ip && !isPrivateIP(log.src_ip)
     const dstPublic = log.dst_ip && !isPrivateIP(log.dst_ip)
-    // For outbound/local traffic, the remote party is the destination
     if (log.direction === 'outbound' || log.direction === 'local') {
       return dstPublic ? log.dst_ip : srcPublic ? log.src_ip : null
     }
@@ -221,7 +223,7 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
 
       // Rule description
       if (displayLog.rule_desc) {
-        const desc = displayLog.rule_desc.replace(/\](?!\s)/, '] ')
+        const desc = normalizeRuleDesc(displayLog.rule_desc)
         sections.push(
           <div key="rule_desc">
             <span className="text-gray-400 text-[12px] uppercase tracking-wider">Rule Description</span>
@@ -300,20 +302,15 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
   const showAbuse = !hiddenColumns.has('threat') || !hiddenColumns.has('categories')
   const abuseDetails = []
 
-  if (showAbuse && displayLog.threat_score !== null && displayLog.threat_score !== undefined) {
+  if (showAbuse && Number.isFinite(displayLog.threat_score)) {
     const score = displayLog.threat_score
-    let color = 'text-emerald-400'
-    let label = 'Clean'
-    if (score >= 75) { color = 'text-red-400'; label = 'Critical' }
-    else if (score >= 50) { color = 'text-orange-400'; label = 'High' }
-    else if (score >= 25) { color = 'text-yellow-400'; label = 'Medium' }
-    else if (score > 0) { color = 'text-blue-400'; label = 'Low' }
+    const level = getThreatLevel(score)
 
     abuseDetails.push(
       <div key="abuse_score">
         <span className="text-gray-400 text-[12px] uppercase tracking-wider">AbuseIPDB Score</span>
-        <div className={`text-sm mt-0.5 ${color} font-medium`}>
-          {score}% · {label}
+        <div className={`text-sm mt-0.5 ${level.color} font-medium`}>
+          {score}% · {level.label}
         </div>
         {!hiddenColumns.has('categories') && decodeThreatCategories(displayLog.threat_categories) && (
           <div className="text-[11px] text-purple-400/70 mt-0.5">
