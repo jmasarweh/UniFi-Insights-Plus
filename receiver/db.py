@@ -388,6 +388,11 @@ class Database:
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
+                    # Transaction-scoped advisory lock prevents race between
+                    # receiver and API processes on first boot (#59).
+                    # pg_advisory_xact_lock auto-releases on commit/rollback,
+                    # so the lock is held until DDL is visible to other sessions.
+                    cur.execute("SELECT pg_advisory_xact_lock(20250314)")
                     for i, sql in enumerate(migrations):
                         try:
                             cur.execute(f"SAVEPOINT sp_{i}")
@@ -400,6 +405,17 @@ class Database:
                                 "Check object ownership and grant privileges to the app DB user.",
                                 sql,
                             )
+                        except psycopg2.errors.UniqueViolation as e:
+                            cur.execute(f"ROLLBACK TO SAVEPOINT sp_{i}")
+                            if e.diag.constraint_name and "pg_type" in e.diag.constraint_name:
+                                logger.info("Schema type already exists, skipping: %s",
+                                            e.diag.message_primary or e)
+                            else:
+                                raise
+                        except psycopg2.errors.DuplicateObject as e:
+                            cur.execute(f"ROLLBACK TO SAVEPOINT sp_{i}")
+                            logger.info("Schema object already exists, skipping: %s",
+                                        e.diag.message_primary or e)
                         except Exception:
                             cur.execute(f"ROLLBACK TO SAVEPOINT sp_{i}")
                             raise
@@ -446,7 +462,8 @@ class Database:
         except SystemExit:
             raise
         except Exception:
-            logger.exception("Schema migration failed")
+            logger.critical("Schema migration failed", exc_info=True)
+            sys.exit(1)
 
         self._backfill_tz_timestamps()
 
