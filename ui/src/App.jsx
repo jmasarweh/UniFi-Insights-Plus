@@ -9,7 +9,7 @@ import FlowViewSkeleton from './components/FlowViewSkeleton'
 const Dashboard = React.lazy(() => import('./components/Dashboard'))
 const ThreatMap = React.lazy(() => import('./components/ThreatMap'))
 const FlowView = React.lazy(() => import('./components/FlowView'))
-import { fetchHealth, fetchConfig, fetchLatestRelease, dismissUpgradeModal, dismissVpnToast, fetchInterfaces, fetchUiSettings, updateUiSettings } from './api'
+import { fetchHealth, fetchConfig, fetchLatestRelease, dismissUpgradeModal, dismissVpnToast, fetchInterfaces, fetchUiSettings, updateUiSettings, fetchUniFiSettings } from './api'
 import { loadInterfaceLabels } from './utils'
 import { isVpnInterface } from './vpnUtils'
 
@@ -97,6 +97,7 @@ export default function App() {
   const [unlabeledVpn, setUnlabeledVpn] = useState([])
   const [allInterfaces, setAllInterfaces] = useState(null)
   const [showWanToast, setShowWanToast] = useState(false)
+  const [showUnifiToast, setShowUnifiToast] = useState(false)
   const [theme, setTheme] = useState(() => {
     const urlTheme = new URLSearchParams(window.location.search).get('theme')
     if (urlTheme === 'light' || urlTheme === 'dark') return urlTheme
@@ -264,6 +265,19 @@ export default function App() {
       if (!unlabeled.length) { setShowVpnToast(false); return }
       if (config.vpn_toast_dismissed) return
       setShowVpnToast(true)
+    }).catch(() => {})
+  }, [config, configLoaded])
+
+  // Check UniFi controller connection status and show toast if disconnected
+  useEffect(() => {
+    if (!config || !configLoaded) return
+    if (!config.unifi_enabled) return
+    const dismissed = sessionStorage.getItem('unifi_toast_dismissed')
+    if (dismissed) return
+    fetchUniFiSettings().then(data => {
+      if (data.host && data.api_key_set && data.status?.connected === false) {
+        setShowUnifiToast(true)
+      }
     }).catch(() => {})
   }, [config, configLoaded])
 
@@ -461,6 +475,30 @@ export default function App() {
               localStorage.setItem('migration_banner_dismissed', '1')
             }}
             className="text-blue-400 hover:text-blue-300 ml-4"
+          >
+            &#x2715;
+          </button>
+        </div>
+      )}
+
+      {/* UniFi controller disconnected toast */}
+      {showUnifiToast && (
+        <div className="flex items-center justify-between px-4 py-2 bg-red-500/10 border-b border-red-500/30 text-xs text-red-400">
+          <span>
+            UniFi controller is not connected.{' '}
+            <button
+              onClick={() => { setShowUnifiToast(false); setShowSettings(true) }}
+              className="underline hover:text-red-300"
+            >
+              Go to Settings to reconnect
+            </button>
+          </span>
+          <button
+            onClick={() => {
+              setShowUnifiToast(false)
+              sessionStorage.setItem('unifi_toast_dismissed', '1')
+            }}
+            className="text-red-400 hover:text-red-300 ml-4"
           >
             &#x2715;
           </button>

@@ -24,6 +24,7 @@ export default function UniFiConnectionForm({
   const [showAdvanced, setShowAdvanced] = useState(true)
   const [testing, setTesting] = useState(false)
   const [error, setError] = useState(null)
+  const [errorCode, setErrorCode] = useState(null)
   const [result, setResult] = useState(null)
   const [phase, setPhase] = useState(null) // null → 'connected' → 'fetching'
   const timeoutRef = useRef(null)
@@ -52,6 +53,7 @@ export default function UniFiConnectionForm({
     if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
     setTesting(true)
     setError(null)
+    setErrorCode(null)
     setResult(null)
     setPhase(null)
     try {
@@ -100,6 +102,7 @@ export default function UniFiConnectionForm({
       } else {
         setPhase(null)
         setError(res.error || 'Connection failed')
+        setErrorCode(res.error_code || null)
       }
     } catch (err) {
       setPhase(null)
@@ -146,8 +149,15 @@ export default function UniFiConnectionForm({
       </div>
 
       {envApiKey && !isSelfHosted && (
-        <div className="mb-4 px-3 py-2 rounded bg-blue-500/10 border border-blue-500/30 text-xs text-blue-400">
-          API key detected from environment variable
+        <div className={`mb-4 px-3 py-2 rounded text-xs ${
+          error && errorCode === 'auth_error'
+            ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+            : 'bg-blue-500/10 border border-blue-500/30 text-blue-400'
+        }`}>
+          {error && errorCode === 'auth_error'
+            ? <>API key set by <code className="text-amber-300">UNIFI_API_KEY</code> environment variable. Verify the key is correct in your Docker Compose file and restart the container.</>
+            : 'API key detected from environment variable'
+          }
         </div>
       )}
 
@@ -163,7 +173,12 @@ export default function UniFiConnectionForm({
             className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 placeholder-gray-500 focus:border-teal-500 focus:outline-none disabled:opacity-50"
           />
           {envHost && (
-            <p className="text-xs text-gray-500 mt-1">Set by UNIFI_HOST environment variable</p>
+            <p className={`text-xs mt-1 ${error && (errorCode === 'connection_error' || errorCode === 'timeout') ? 'text-amber-400' : 'text-gray-500'}`}>
+              {error && (errorCode === 'connection_error' || errorCode === 'timeout')
+                ? <>This field is locked by the <code className="text-amber-300">UNIFI_HOST</code> environment variable. If the address is wrong, update <code className="text-amber-300">UNIFI_HOST</code> in your Docker Compose file and restart the container.</>
+                : <>Set by <code className="text-gray-400">UNIFI_HOST</code> environment variable</>
+              }
+            </p>
           )}
         </div>
 

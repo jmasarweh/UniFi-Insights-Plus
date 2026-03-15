@@ -5,6 +5,7 @@ export function renderMarkdown(md) {
   if (!md) return ''
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   return esc(md)
+    .replace(/^#### (.+)$/gm, '<h4 class="text-sm font-medium text-gray-300 mt-2 mb-0.5">$1</h4>')
     .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold text-gray-200 mt-2 mb-0.5">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-sm font-semibold text-gray-100 mt-3 mb-1">$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, '<strong class="text-gray-200">$1</strong>')
@@ -17,8 +18,8 @@ export function renderMarkdown(md) {
     .replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="list-disc space-y-0.5 my-1">$1</ul>')
     .replace(/<\/li>\n<li/g, '</li><li')
     .replace(/\n{2,}/g, '<div class="h-1"></div>')
-    .replace(/\n(?=<(?:h[23]|ul|\/ul|div))/g, '')
-    .replace(/(<\/(?:h[23]|ul|div)>)\n/g, '$1')
+    .replace(/\n(?=<(?:h[234]|ul|\/ul|div))/g, '')
+    .replace(/(<\/(?:h[234]|ul|div)>)\n/g, '$1')
     .replace(/\n/g, '<br/>')
 }
 

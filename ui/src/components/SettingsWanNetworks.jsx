@@ -158,9 +158,9 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
                   <span className="text-sm font-medium text-gray-200">
                     {unifiSettings?.host || 'UniFi Gateway'}
                   </span>
-                  <span className="flex items-center gap-1.5 text-sm text-emerald-400 leading-none">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 block" />
-                    Online
+                  <span className={`flex items-center gap-1.5 text-sm leading-none ${unifiSettings?.status?.connected ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full block ${unifiSettings?.status?.connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    {unifiSettings?.status?.connected ? 'Online' : 'Offline'}
                   </span>
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
