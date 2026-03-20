@@ -219,8 +219,8 @@ export default function LogStream({ version, latestRelease, maxFilterDays, drill
     if (expandedId === id) {
       setExpandedId(null)
       setPendingCount(0)
-      // Refresh immediately on collapse
-      load(filters)
+      // Refresh silently on collapse — no skeleton so the user keeps their place
+      load(filters, { background: true })
     } else {
       setExpandedId(id)
       setPendingCount(0)

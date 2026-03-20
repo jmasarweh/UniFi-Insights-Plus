@@ -82,7 +82,7 @@ const BASE_SECTIONS = [
   },
 ]
 
-export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn = [], onVpnSaved: onVpnSavedApp, version, latestRelease, totalLogs, storage, onAuthEnabled }) {
+export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn = [], onVpnSaved: onVpnSavedApp, version, latestRelease, totalLogs, storage, onAuthEnabled, onUiSettingsChanged }) {
   const [config, setConfig] = useState(null)
   const [unifiSettings, setUnifiSettings] = useState(null)
   const [netConfig, setNetConfig] = useState(null)
@@ -325,7 +325,7 @@ export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn
                   <SettingsDataBackups totalLogs={totalLogs} storage={storage} />
                 )}
                 {activeSection === 'user-interface' && (
-                  <SettingsUserInterface />
+                  <SettingsUserInterface onSaved={onUiSettingsChanged} />
                 )}
                 {activeSection === 'security' && (
                   <SettingsSecurity onAuthEnabled={onAuthEnabled} />

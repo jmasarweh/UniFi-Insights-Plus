@@ -3,6 +3,8 @@ services:
     build: .
     #image: ghcr.io/jmasarweh/unifi-log-insight:latest
     #pull_policy: always
+    # container_name intentionally differs from service name — this is a dev
+    # worktree container and must not conflict with the production container.
     container_name: insights-plus-auth
     restart: unless-stopped
     logging:
@@ -16,10 +18,12 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data # Not needed when using external DB
       - ./maxmind:/app/maxmind
-    # If you add real credentials here, do not commit this file, and 
-    # instead use .env file instead for credentials/passwords
+    # If you add real credentials here, do not commit this file —
+    # use .env file instead for credentials/passwords
     env_file:
     - .env
+    # Commented environment block kept intentionally as inline reference for
+    # available variables — .env.example is not used in this project.
     #environment:
     #  POSTGRES_PASSWORD: "your_strong_password_here"
     #  ABUSEIPDB_API_KEY: "your_key_here"

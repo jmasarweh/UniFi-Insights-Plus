@@ -17,7 +17,7 @@ const THEME_OPTIONS = [
   { value: 'light', label: 'Light' },
 ]
 
-export default function SettingsUserInterface() {
+export default function SettingsUserInterface({ onSaved }) {
   const [settings, setSettings] = useState(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -55,6 +55,7 @@ export default function SettingsUserInterface() {
       }
       setDirty(false)
       setStatus('saved')
+      onSaved?.(settings)
     } catch {
       setStatus('error')
     } finally {

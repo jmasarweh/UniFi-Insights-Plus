@@ -11,6 +11,10 @@
     <div class="header">
       <img src="../icons/icon-32.png" alt="" class="logo">
       <h1>UniFi Insights Plus</h1>
+      <span class="header-status" id="header-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Checking...</span>
+      </span>
     </div>
 
     <!-- Setup View -->
@@ -55,10 +59,6 @@
 
     <!-- Connected View -->
     <div id="connected-view" class="view" hidden>
-      <div class="status-row">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Checking...</span>
-      </div>
 
       <div id="traffic-overview" class="traffic-overview" hidden>
         <div class="to-header">
@@ -117,25 +117,13 @@
         <p id="controller-error" class="error" hidden aria-live="polite"></p>
       </div>
 
-      <!-- Feature toggles -->
-      <div class="toggles">
-        <label class="toggle">
-          <input type="checkbox" id="toggle-tab" checked>
-          <span>Add Insights Plus tab to UniFi UI</span>
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="toggle-enrich" checked>
-          <span>Enrich Unifi Insights flows records</span>
-        </label>
-      </div>
-
       <!-- API Token Section -->
       <div class="section-card">
         <div class="section-header">
           <span class="section-title">API Token</span>
           <span id="token-status" class="status-pill" hidden></span>
         </div>
-        <div id="token-display" hidden>
+        <div id="token-display" class="controller-display" hidden>
           <span id="token-preview" class="controller-url"></span>
           <button type="button" id="edit-token-btn" class="btn-icon" title="Edit">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
@@ -152,6 +140,18 @@
           <p class="hint small">Create your API token from Settings &gt; API<br>Client Type: Extension</p>
         </div>
         <p id="token-error" class="error" hidden aria-live="polite"></p>
+      </div>
+
+      <!-- Feature toggles -->
+      <div class="toggles">
+        <label class="toggle">
+          <input type="checkbox" id="toggle-tab" checked>
+          <span>Add Insights Plus tab to UniFi UI</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-enrich" checked>
+          <span>Enrich Unifi Insights flows records</span>
+        </label>
       </div>
 
       <div id="reload-bar" class="reload-bar" hidden>

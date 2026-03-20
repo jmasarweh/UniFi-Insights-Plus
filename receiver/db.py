@@ -409,7 +409,7 @@ class Database:
                 id              SERIAL PRIMARY KEY,
                 username        VARCHAR(100) UNIQUE NOT NULL,
                 password_hash   TEXT NOT NULL,
-                role_id         INTEGER NOT NULL REFERENCES roles(id),
+                role_id         INTEGER NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
                 is_active       BOOLEAN DEFAULT TRUE,
                 created_at      TIMESTAMPTZ DEFAULT NOW(),
                 updated_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -427,6 +427,7 @@ class Database:
                 user_agent      TEXT
             )""",
             "CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)",
             # Auth: api_tokens table (replaces mcp_tokens)
             """CREATE TABLE IF NOT EXISTS api_tokens (

@@ -55,6 +55,14 @@ body::-webkit-scrollbar {
   height: 24px;
 }
 
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #999;
+}
+
 /* Hints */
 .hint {
   color: #6b7280;

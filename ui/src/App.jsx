@@ -479,6 +479,7 @@ export default function App() {
       totalLogs={health?.total_logs}
       storage={health?.storage}
       onAuthEnabled={() => { bootstrapDoneRef.current = true; setAuthState('authenticated') }}
+      onUiSettingsChanged={setUiSettings}
     />
   }
 

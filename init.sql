@@ -148,3 +148,90 @@ CREATE TABLE IF NOT EXISTS system_config (
     value       JSONB NOT NULL,
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Authentication ──────────────────────────────────────────────────────────
+
+-- pgcrypto for gen_random_uuid() used by sessions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- RBAC roles
+CREATE TABLE IF NOT EXISTS roles (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(50) UNIQUE NOT NULL,
+    permissions     JSONB NOT NULL DEFAULT '[]',
+    is_system       BOOLEAN DEFAULT FALSE,
+    description     TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO roles (name, permissions, is_system, description) VALUES
+    ('admin', '["*"]', TRUE, 'Full access to all features'),
+    ('viewer', '["logs.read", "stats.read", "flows.read", "threats.read", "dashboard.read"]', TRUE, 'Read-only access to logs and dashboards')
+ON CONFLICT (name) DO NOTHING;
+
+-- Users
+CREATE TABLE IF NOT EXISTS users (
+    id              SERIAL PRIMARY KEY,
+    username        VARCHAR(100) UNIQUE NOT NULL,
+    password_hash   TEXT NOT NULL,
+    role_id         INTEGER NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    last_login_at   TIMESTAMPTZ
+);
+
+-- Sessions (login cookies)
+CREATE TABLE IF NOT EXISTS sessions (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    token_hash      TEXT NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    ip_address      INET,
+    user_agent      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+-- API tokens (MCP, browser extension, generic API access)
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id              UUID PRIMARY KEY,
+    name            TEXT NOT NULL,
+    token_prefix    TEXT NOT NULL,
+    token_hash      TEXT NOT NULL,
+    token_salt      TEXT NOT NULL,
+    scopes          TEXT[] NOT NULL,
+    client_type     VARCHAR(20) NOT NULL,
+    owner_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at    TIMESTAMPTZ,
+    disabled        BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens(token_prefix);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_active ON api_tokens(disabled) WHERE disabled = false;
+CREATE INDEX IF NOT EXISTS idx_api_tokens_owner ON api_tokens(owner_user_id);
+
+-- Audit log (login events, API calls, admin actions)
+CREATE TABLE IF NOT EXISTS audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    token_id        UUID REFERENCES api_tokens(id) ON DELETE SET NULL,
+    action          VARCHAR(50) NOT NULL,
+    detail          JSONB,
+    ip_address      INET,
+    user_agent      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_token_id ON audit_log(token_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+
+-- Auth configuration defaults
+INSERT INTO system_config (key, value, updated_at) VALUES
+    ('auth_enabled', 'false'::jsonb, NOW()),
+    ('auth_session_ttl_hours', '168'::jsonb, NOW()),
+    ('audit_log_retention_days', '90'::jsonb, NOW())
+ON CONFLICT (key) DO NOTHING;

@@ -191,6 +191,20 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                         <span className="text-sm text-red-400">{setupStatus.text}</span>
                       )}
                     </div>
+                    <div className="mt-4 p-3 rounded bg-blue-500/10 border border-blue-500/30 text-sm text-blue-300">
+                      <p className="font-medium text-blue-200">Using the browser extension?</p>
+                      <p className="mt-1 text-blue-300/80">After enabling authentication:</p>
+                      <ol className="mt-1.5 list-decimal list-inside space-y-1 text-blue-300/80">
+                        <li>Update the extension to <strong className="text-blue-200">v1.1.0</strong> or later from the Chrome Web Store or Firefox Add-ons site</li>
+                        <li>Go to <strong className="text-blue-200">Settings &rarr; API</strong> and create a token with client type <strong className="text-blue-200">Extension</strong></li>
+                        <li>Paste the token into the extension popup</li>
+                        <li>Ensure your controller URL in the extension uses <strong className="text-blue-200">HTTPS</strong></li>
+                      </ol>
+                      <p className="mt-2 text-blue-300/80">
+                        For more details, see the{' '}
+                        <a href="https://insightsplus.dev/docs/authentication" target="_blank" rel="noopener noreferrer" className="underline text-blue-200 hover:text-blue-100">Authentication docs</a>.
+                      </p>
+                    </div>
                   </form>
                 ) : (
                   <div className="p-3 rounded bg-amber-500/10 border border-amber-500/30 text-sm text-amber-400">
