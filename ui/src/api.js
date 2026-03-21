@@ -22,7 +22,9 @@ async function apiFetch(url, options = {}) {
   }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}))
-    throw new Error(body.detail || `API error: ${resp.status}`)
+    const err = new Error(body.detail || `API error: ${resp.status}`)
+    err.status = resp.status
+    throw err
   }
   return resp.json()
 }
@@ -490,6 +492,10 @@ export async function updateSessionTtl(hours) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hours })
   })
+}
+
+export async function fetchProxyToken() {
+  return apiFetch(`${BASE}/auth/proxy-token`)
 }
 
 // ── Token API ───────────────────────────────────────────────────────────────

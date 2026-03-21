@@ -1,15 +1,22 @@
 /**
  * Shared active-token list used by SettingsAPI and SettingsMCP.
+ * Shows first `pageSize` tokens with pagination controls.
  */
+import { useState } from 'react'
+
 // PropTypes not used in this project. Date values come from own API (Python
 // isoformat) — defensive validation against own server is unnecessary.
-export default function TokenList({ tokens = [], onRevoke, formatPrefix, revokingId }) {
+export default function TokenList({ tokens = [], onRevoke, formatPrefix, revokingId, pageSize = 5 }) {
+  const [page, setPage] = useState(0)
+  const totalPages = Math.max(1, Math.ceil(tokens.length / pageSize))
+  const visible = tokens.slice(page * pageSize, (page + 1) * pageSize)
+
   return (
     <div className="space-y-2">
       {tokens.length === 0 && (
         <p className="text-sm text-gray-600">No tokens yet.</p>
       )}
-      {tokens.map(t => (
+      {visible.map(t => (
         <div
           key={t.id}
           className="flex items-center justify-between gap-3 px-3 py-2 rounded border border-gray-800 bg-gray-900/60"
@@ -48,6 +55,27 @@ export default function TokenList({ tokens = [], onRevoke, formatPrefix, revokin
           </div>
         </div>
       ))}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-gray-500">{tokens.length} tokens · Page {page + 1} of {totalPages}</p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(p => p - 1)}
+              disabled={page === 0}
+              className="px-2 py-1 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            <button
+              onClick={() => setPage(p => p + 1)}
+              disabled={page >= totalPages - 1}
+              className="px-2 py-1 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

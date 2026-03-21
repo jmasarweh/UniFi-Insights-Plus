@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchAuthStatus, fetchAuthMe, authChangePassword, authSetup, updateSessionTtl } from '../api'
+import { fetchAuthStatus, fetchAuthMe, authChangePassword, authSetup, updateSessionTtl, fetchProxyToken } from '../api'
+import CopyButton from './CopyButton'
 
 const INPUT_CLS = 'w-full px-3 py-1.5 bg-gray-900 border border-gray-700 rounded text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-teal-500'
 
@@ -28,6 +29,9 @@ export default function SettingsSecurity({ onAuthEnabled }) {
   const [ttlSaving, setTtlSaving] = useState(false)
   const [ttlStatus, setTtlStatus] = useState(null) // 'saved' | 'error'
 
+  // Proxy trust token
+  const [proxyToken, setProxyToken] = useState(null)
+
   const reload = useCallback(async function reload() {
     setLoading(true)
     try {
@@ -35,9 +39,23 @@ export default function SettingsSecurity({ onAuthEnabled }) {
         fetchAuthStatus(),
         fetchAuthMe(),
       ])
+      setProxyToken(null)
       if (status.status === 'fulfilled') {
         setAuthStatus(status.value)
         if (status.value.session_ttl_hours) setSessionTtl(status.value.session_ttl_hours)
+        // Load proxy token from admin-only endpoint (post-auth only)
+        if (status.value.auth_enabled_effective) {
+          try {
+            const tokenResp = await fetchProxyToken()
+            setProxyToken(tokenResp.token)
+          } catch (err) {
+            // 401/403 expected for non-admin users — only log unexpected errors.
+            const status = err?.status
+            if (status !== 401 && status !== 403 && err?.message !== 'Session expired') {
+              console.error('Failed to fetch proxy token:', err)
+            }
+          }
+        }
       }
       if (meResp.status === 'fulfilled') setMe(meResp.value)
     } finally {
@@ -112,14 +130,16 @@ export default function SettingsSecurity({ onAuthEnabled }) {
   }
 
   if (loading) return (
-    <div className="space-y-8 animate-pulse">
-      <div>
-        <div className="h-5 w-40 bg-gray-800 rounded mb-3" />
-        <div className="rounded-lg border border-gray-700 bg-gray-950 p-5 space-y-3">
-          <div className="h-4 w-56 bg-gray-800 rounded" />
-          <div className="h-4 w-36 bg-gray-800 rounded" />
+    <div className="space-y-8">
+      <section>
+        <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">Authentication</h2>
+        <div className="rounded-lg border border-gray-700 bg-gray-950 px-4 py-3 animate-pulse">
+          <div className="flex items-center justify-between">
+            <div className="h-4 w-32 bg-gray-800 rounded" />
+            <div className="h-4 w-16 bg-gray-800 rounded" />
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   )
 
@@ -131,16 +151,19 @@ export default function SettingsSecurity({ onAuthEnabled }) {
         <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">Authentication</h2>
         <div className="rounded-lg border border-gray-700 bg-gray-950">
           {/* Status */}
-          <div className="p-5">
-            <div className="flex items-center gap-3">
-              <span className={`w-2 h-2 rounded-full ${authEnabled ? 'bg-green-500' : 'bg-gray-500'}`} />
-              <span className="text-sm text-gray-300">
-                {authEnabled ? 'Authentication enabled' : 'Authentication disabled (open access)'}
+          <div className="px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-200 font-medium">
+                {authEnabled ? 'Authentication' : 'Authentication disabled'}
+              </span>
+              <span className={`flex items-center gap-1.5 text-sm leading-none ${authEnabled ? 'text-emerald-400' : 'text-gray-500'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full block ${authEnabled ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                {authEnabled ? 'Active' : 'Inactive'}
               </span>
             </div>
             {!authEnabled && (
-              <p className="mt-3 text-sm text-gray-500">
-                Set <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">AUTH_ENABLED=true</code> in your <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">.env</code> or <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">docker-compose.yml</code> and restart the container to enable authentication.
+              <p className="mt-2 text-xs text-gray-500">
+                Set <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">AUTH_ENABLED=true</code> in your <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">.env</code> or <code className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">docker-compose.yml</code> and restart the container.
               </p>
             )}
           </div>
@@ -202,13 +225,19 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                       </ol>
                       <p className="mt-2 text-blue-300/80">
                         For more details, see the{' '}
-                        <a href="https://insightsplus.dev/docs/authentication" target="_blank" rel="noopener noreferrer" className="underline text-blue-200 hover:text-blue-100">Authentication docs</a>.
+                        <a href="https://insightsplus.dev/docs/authentication" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-blue-200 hover:text-blue-100">
+                          Authentication docs
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                        </a>.
                       </p>
                     </div>
                   </form>
                 ) : (
-                  <div className="p-3 rounded bg-amber-500/10 border border-amber-500/30 text-sm text-amber-400">
-                    Enabling authentication requires HTTPS. Please access the app through a reverse proxy with TLS enabled.
+                  <div className="flex items-start gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2">
+                    <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-sm text-yellow-400/90">Enabling authentication requires HTTPS. Please access the app through a reverse proxy with TLS enabled.</p>
                   </div>
                 )}
               </div>
@@ -227,7 +256,7 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => { setShowPwChange(!showPwChange); setPwStatus(null) }}
-                    className="text-sm text-teal-500 hover:text-teal-400 transition-colors"
+                    className="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                   >
                     Change password
                   </button>
@@ -330,6 +359,131 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                 {ttlStatus === 'error' && <span className="text-sm text-red-400">Failed to save</span>}
               </div>
               <div /> {/* flex spacer — pushes status text left in justify-between layout */}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {proxyToken && (
+        <section>
+          <h2 className="text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider">Reverse Proxy Trust</h2>
+          <div className="rounded-lg border border-gray-700 bg-gray-950">
+            {/* Warning */}
+            {!authStatus?.proxy_trusted && (
+              <div className="m-5 mb-0 flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2">
+                <svg className="w-4 h-4 text-yellow-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm text-yellow-400/90">Your reverse proxy is not sending the <span className="font-mono">X-ULI-Proxy-Auth</span> header. HTTPS detection and IP forwarding will not work until configured.</p>
+              </div>
+            )}
+
+            {/* Token */}
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-gray-400">
+                Add this header to your reverse proxy so the app can verify secure connections.
+              </p>
+              <div className="rounded bg-gray-900 border border-gray-800 p-3 overflow-x-auto">
+                <pre className="text-sm text-gray-300 font-mono whitespace-pre select-all">{proxyToken}</pre>
+              </div>
+              <div className="flex items-center justify-end gap-1.5">
+                <span className="text-sm text-gray-300">Copy token</span>
+                <CopyButton text={proxyToken} color="text-teal-400 hover:text-teal-300" className="ml-0" />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-800" />
+
+            {/* Proxy setup instructions — collapsible */}
+            <div className="p-5">
+              <details className="group">
+                <summary className="flex items-center gap-1 cursor-pointer text-base font-semibold text-gray-300 mb-3 uppercase tracking-wider list-none">
+                  <span className="transition-transform group-open:rotate-90">&#x25B8;</span> Proxy Setup Instructions
+                </summary>
+                <div className="rounded-lg border border-gray-700 bg-gray-950">
+                  {/* nginx */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <img src="/nginx-logo.png" alt="Nginx" className="w-4 h-4 shrink-0" />
+                      <p className="text-base font-semibold text-gray-200">Nginx</p>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Add this line inside your <span className="font-mono text-gray-300">location /</span> block:
+                    </p>
+                    <div className="rounded bg-gray-900 border border-gray-800 p-3 overflow-x-auto">
+                      <pre className="text-sm text-gray-300 font-mono whitespace-pre">{`location / {\n    proxy_set_header X-ULI-Proxy-Auth "${proxyToken}";\n    # ... your existing proxy_pass and other headers ...\n}`}</pre>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span className="text-sm text-gray-300">Copy header line</span>
+                      <CopyButton text={`proxy_set_header X-ULI-Proxy-Auth "${proxyToken}";`} color="text-teal-400 hover:text-teal-300" className="ml-0" />
+                    </div>
+                    <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2">
+                      <svg className="w-4 h-4 text-yellow-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                      </svg>
+                      <p className="text-sm text-yellow-400/90">
+                        <strong>Nginx Proxy Manager:</strong> Use <strong>Custom Locations</strong> (not the Advanced tab). Add a <span className="font-mono">/</span> location and paste the header line above. The Advanced tab places headers at server level, which nginx silently drops when the location block has its own.{' '}
+                        <a href="https://insightsplus.dev/docs/authentication#reverse-proxy" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-yellow-300 hover:text-yellow-200">
+                          Full setup guide
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                        </a>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-800" />
+
+                  {/* Caddy */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <img src="/caddy-logo.png" alt="Caddy" className="w-4 h-4 shrink-0" />
+                      <p className="text-base font-semibold text-gray-200">Caddy</p>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Add <span className="font-mono text-gray-300">header_up</span> inside your <span className="font-mono text-gray-300">reverse_proxy</span> block:
+                    </p>
+                    <div className="rounded bg-gray-900 border border-gray-800 p-3 overflow-x-auto">
+                      <pre className="text-sm text-gray-300 font-mono whitespace-pre">{`reverse_proxy <your-host>:8090 {\n    header_up X-ULI-Proxy-Auth "${proxyToken}"\n}`}</pre>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span className="text-sm text-gray-300">Copy snippet</span>
+                      <CopyButton text={`header_up X-ULI-Proxy-Auth "${proxyToken}"`} color="text-teal-400 hover:text-teal-300" className="ml-0" />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-800" />
+
+                  {/* Traefik */}
+                  <div className="p-5 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <img src="/traefik-logo.png" alt="Traefik" className="w-4 h-4 shrink-0" />
+                      <p className="text-base font-semibold text-gray-200">Traefik</p>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Add these Docker labels to your service in <span className="font-mono text-gray-300">docker-compose.yml</span>:
+                    </p>
+                    <div className="rounded bg-gray-900 border border-gray-800 p-3 overflow-x-auto">
+                      <pre className="text-sm text-gray-300 font-mono whitespace-pre">{`labels:\n  - "traefik.http.middlewares.uli-auth.headers.customrequestheaders.X-ULI-Proxy-Auth=${proxyToken}"\n  - "traefik.http.routers.<your-router>.middlewares=uli-auth"`}</pre>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span className="text-sm text-gray-300">Copy middleware label</span>
+                      <CopyButton text={`traefik.http.middlewares.uli-auth.headers.customrequestheaders.X-ULI-Proxy-Auth=${proxyToken}`} color="text-teal-400 hover:text-teal-300" className="ml-0" />
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            {/* Help text */}
+            <div className="border-t border-gray-800" />
+            <div className="px-5 py-3">
+              <p className="text-sm text-gray-500">
+                Token derived from SECRET_KEY, POSTGRES_PASSWORD, or DB_PASSWORD (first non-empty wins). If the secret changes, update your proxy config.{' '}
+                <a href="https://insightsplus.dev/docs/authentication#reverse-proxy" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-gray-400 hover:text-gray-300">
+                  Full setup guide
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                </a>
+              </p>
             </div>
           </div>
         </section>

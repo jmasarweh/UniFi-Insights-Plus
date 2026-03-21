@@ -82,11 +82,11 @@ const BASE_SECTIONS = [
   },
 ]
 
-export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn = [], onVpnSaved: onVpnSavedApp, version, latestRelease, totalLogs, storage, onAuthEnabled, onUiSettingsChanged }) {
+export default function SettingsOverlay({ onClose, startInReconfig, initialSection, unlabeledVpn = [], onVpnSaved: onVpnSavedApp, version, latestRelease, totalLogs, storage, onAuthEnabled, onUiSettingsChanged }) {
   const [config, setConfig] = useState(null)
   const [unifiSettings, setUnifiSettings] = useState(null)
   const [netConfig, setNetConfig] = useState(null)
-  const [activeSection, setActiveSection] = useState('wan-networks')
+  const [activeSection, setActiveSection] = useState(initialSection || 'wan-networks')
   const [reconfigMode, setReconfigMode] = useState(!!startInReconfig)
   const [wizardPath, setWizardPath] = useState(null)
   const [showNotes, setShowNotes] = useState(false)
@@ -216,16 +216,28 @@ export default function SettingsOverlay({ onClose, startInReconfig, unlabeledVpn
             )}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
-          aria-label="Close settings"
-        >
+        <div className="flex items-center gap-1">
+          <a
+            href="https://insightsplus.dev/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            aria-label="Documentation"
+          >
+            Docs
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
+            aria-label="Close settings"
+          >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5" aria-hidden="true">
             <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
           </svg>
         </button>
+        </div>
       </header>
 
       {/* Sidebar + Content */}

@@ -163,12 +163,18 @@ export default function UniFiConnectionForm({
 
       <div className="space-y-3 p-4 rounded-lg border border-gray-700 bg-gray-950">
         <div>
-          <label className="block text-xs font-medium text-gray-300 mb-1">UniFi Gateway/Controller IP</label>
+          <label className="block text-xs font-medium text-gray-300 mb-1">UniFi Gateway URL or IP</label>
+          <p className="text-xs text-gray-500 mb-1.5">
+            {isSelfHosted
+              ? <>IP address with port (e.g. <span className="font-mono text-gray-400">192.168.1.1:8443</span>). Include <span className="font-mono text-gray-400">https://</span> and port if needed.</>
+              : <>IP address (e.g. <span className="font-mono text-gray-400">192.168.1.1</span>) or full URL if behind a reverse proxy (e.g. <span className="font-mono text-gray-400">https://unifi.local</span>). Protocol is added automatically if omitted.</>
+            }
+          </p>
           <input
             type="text"
             value={host}
             onChange={e => { setHost(e.target.value); setResult(null); setError(null) }}
-            placeholder={isSelfHosted ? '192.168.1.1:8443' : '192.168.1.1'}
+            placeholder={isSelfHosted ? '192.168.1.1:8443' : 'https://192.168.1.1 or https://unifi.local'}
             disabled={!!envHost}
             className="w-full px-3 py-2 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 placeholder-gray-500 focus:border-teal-500 focus:outline-none disabled:opacity-50"
           />

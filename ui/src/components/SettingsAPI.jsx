@@ -228,7 +228,11 @@ export default function SettingsAPI() {
           <h3 className="text-sm font-medium text-gray-200 mb-2">Browser Extension</h3>
           <p className="text-sm text-gray-400">
             Create a token with <span className="font-mono">extension</span> client type and the scopes your extension needs.
-            Paste the token into the extension popup under "API Token".
+            Paste the token into the extension popup under "API Token".{' '}
+            <a href="https://insightsplus.dev/docs/browser-extension" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors">
+              Extension setup guide
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+            </a>
           </p>
         </div>
       </section>
