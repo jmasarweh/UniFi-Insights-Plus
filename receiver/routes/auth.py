@@ -101,7 +101,15 @@ def _require_https(request: Request):
 def _auth_enabled() -> bool:
     if not AUTH_ENABLED:
         return False
-    return bool(get_config(enricher_db, 'auth_enabled', False))
+    enabled = bool(get_config(enricher_db, 'auth_enabled', False))
+    if not enabled and _has_admin():
+        # AUTH_ENABLED env var is true and an admin exists, but the DB flag
+        # is stale (e.g. toggled off then on).  Auto-sync to avoid showing
+        # the setup form again.
+        set_config(enricher_db, 'auth_enabled', True)
+        logger.info("Auto-enabled auth: AUTH_ENABLED=true and admin user exists in DB")
+        return True
+    return enabled
 
 
 def _has_users() -> bool:
@@ -109,6 +117,23 @@ def _has_users() -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT EXISTS(SELECT 1 FROM users WHERE is_active = true)")
+            return cur.fetchone()[0]
+    finally:
+        put_conn(conn)
+
+
+def _has_admin() -> bool:
+    """Check if an active admin user exists (by role name, not ID)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT EXISTS(
+                    SELECT 1 FROM users u
+                    JOIN roles r ON r.id = u.role_id
+                    WHERE r.name = 'admin' AND u.is_active = true
+                )"""
+            )
             return cur.fetchone()[0]
     finally:
         put_conn(conn)
@@ -363,14 +388,21 @@ def auth_status(request: Request):
     """Public bootstrap endpoint for SPA."""
     from routes.setup import setup_status as get_setup_status
     setup_result = get_setup_status()
+    auth_enabled = _auth_enabled()
     result = {
-        "auth_enabled_effective": _auth_enabled(),
+        "auth_enabled_effective": auth_enabled,
         "has_users": _has_users(),
+        "has_admin": _has_admin(),
         "is_https": get_forwarded_proto(request) == 'https',
         "proxy_trusted": _is_trusted_proxy(request),
         "setup_complete": setup_result.get('setup_complete', False),
         "session_ttl_hours": int(get_config(enricher_db, 'auth_session_ttl_hours', 168) or 168),
     }
+    # Expose proxy token only when auth is not active — the app is already
+    # fully unprotected at this point, so no additional risk.  Once auth is
+    # enabled this field is omitted; users get it from the admin-only endpoint.
+    if not auth_enabled:
+        result["proxy_token"] = PROXY_AUTH_TOKEN
     return result
 
 
