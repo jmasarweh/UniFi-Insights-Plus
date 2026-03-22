@@ -14,6 +14,46 @@ import { fetchHealth, fetchConfig, fetchLatestRelease, dismissUpgradeModal, dism
 import { loadInterfaceLabels } from './utils'
 import { isVpnInterface } from './vpnUtils'
 
+function LoadingSplash() {
+  return (
+    <div className="flex items-center justify-center h-dvh bg-gray-950">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 116" fill="none" className="w-20 h-24">
+        <style>{`
+          @keyframes trace {
+            0% { stroke-dashoffset: 200; }
+            100% { stroke-dashoffset: 0; }
+          }
+          .trace-path {
+            stroke-dasharray: 40 160;
+            animation: trace 1.8s linear infinite;
+          }
+          .trace-delay-1 { animation-delay: -0.4s; }
+          .trace-delay-2 { animation-delay: -0.8s; }
+          .trace-delay-3 { animation-delay: -1.2s; }
+          @keyframes arc-pulse {
+            0%, 100% { opacity: 0.12; }
+            50% { opacity: 0.7; }
+          }
+          .arc-pulse {
+            animation: arc-pulse 2s ease-in-out infinite;
+          }
+        `}</style>
+        {/* Static dim icon */}
+        <path d="M 29 68 C 22 62, 16 53, 16 41 A 34 34 0 1 1 84 41 C 84 53, 78 62, 71 68" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" fill="none" opacity="0.15"/>
+        <path d="M 28 34 A 18 18 0 0 1 44 22" stroke="#14B8A6" strokeWidth="4.8" strokeLinecap="round" fill="none" className="arc-pulse"/>
+        <line x1="28" y1="75" x2="72" y2="75" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" opacity="0.15"/>
+        <line x1="36" y1="84" x2="64" y2="84" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" opacity="0.15"/>
+        <text x="50" y="110" textAnchor="middle" fontFamily="-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif" fontWeight="800" fontSize="19" letterSpacing="0.16em" fill="#0D9488">PLUS</text>
+        {/* Animated chasing traces */}
+        <path d="M 29 68 C 22 62, 16 53, 16 41 A 34 34 0 1 1 84 41 C 84 53, 78 62, 71 68" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" fill="none" className="trace-path"/>
+        <path d="M 28 34 A 18 18 0 0 1 44 22" stroke="#14B8A6" strokeWidth="4.8" strokeLinecap="round" fill="none" className="trace-path trace-delay-1"/>
+        <line x1="28" y1="75" x2="72" y2="75" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" className="trace-path trace-delay-2"/>
+        <line x1="36" y1="84" x2="64" y2="84" stroke="#14B8A6" strokeWidth="5.2" strokeLinecap="round" className="trace-path trace-delay-3"/>
+      </svg>
+    </div>
+  )
+}
+
 /** Validate an IP-like string (IPv4 dotted-decimal or IPv6 hex+colon). */
 function isValidIpFormat(ip) {
   if (!ip || ip.length > 45) return false
@@ -226,6 +266,10 @@ export default function App() {
         }
 
         if (!status.auth_enabled_effective) {
+          // Still warn about missing proxy header — affects HTTPS detection & IP forwarding
+          if (!status.proxy_trusted && !sessionStorage.getItem('proxy_toast_dismissed')) {
+            setShowProxyToast(true)
+          }
           setAuthState('none')
           return
         }
@@ -455,11 +499,7 @@ export default function App() {
 
   // Auth gates
   if (authState === 'loading') {
-    return (
-      <div className="flex items-center justify-center h-dvh bg-gray-950 text-gray-300 text-sm">
-        Loading...
-      </div>
-    )
+    return <LoadingSplash />
   }
 
   if (authState === 'login') {
@@ -475,11 +515,7 @@ export default function App() {
   }
 
   if (!configLoaded) {
-    return (
-      <div className="flex items-center justify-center h-dvh bg-gray-950 text-gray-300 text-sm">
-        Loading configuration...
-      </div>
-    )
+    return <LoadingSplash />
   }
 
   // Show setup wizard if not configured
