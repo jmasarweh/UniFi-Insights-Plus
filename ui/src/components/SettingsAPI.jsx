@@ -60,8 +60,6 @@ export default function SettingsAPI() {
       })
       setCreatedToken(resp.token)
       setShowTokenModal(true)
-      setTokenName('')
-      setTokenScopes(new Set(['logs.read', 'stats.read']))
       setCreateStatus(null)
     } catch (err) {
       setCreateStatus({ type: 'error', text: err.message || 'Failed to create token' })
@@ -89,7 +87,8 @@ export default function SettingsAPI() {
   function toggleScope(scope) {
     setTokenScopes(prev => {
       const next = new Set(prev)
-      next.has(scope) ? next.delete(scope) : next.add(scope)
+      if (next.has(scope)) next.delete(scope)
+      else next.add(scope)
       return next
     })
   }
@@ -128,7 +127,7 @@ export default function SettingsAPI() {
                 type="text"
                 value={tokenName}
                 onChange={e => setTokenName(e.target.value)}
-                placeholder="e.g. Grafana integration"
+                placeholder={tokenClientType === 'extension' ? 'e.g. Chrome PC' : tokenClientType === 'mcp' ? 'e.g. Claude Desktop' : 'e.g. Grafana integration'}
                 className={`w-full max-w-sm ${INPUT_CLS}`}
               />
             </div>
@@ -259,7 +258,13 @@ export default function SettingsAPI() {
         <TokenCreatedModal
           token={createdToken}
           title="API Token Created"
-          onClose={() => { setShowTokenModal(false); setCreatedToken(null) }}
+          onClose={() => {
+            setShowTokenModal(false)
+            setCreatedToken(null)
+            setTokenName('')
+            setTokenClientType('api')
+            setTokenScopes(new Set(['logs.read', 'stats.read']))
+          }}
         />
       )}
     </div>

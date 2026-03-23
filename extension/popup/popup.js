@@ -335,8 +335,8 @@ async function showConnected(settings) {
   const authRequired = trafficResp.authRequired;
   const hasToken = tokenResp.ok && tokenResp.token;
 
-  // Auth gate: server reachable, requires auth, but no token set
-  if (serverReachable && authRequired && !hasToken) {
+  // Auth gate: server reachable, requires auth, and either no token or token was revoked
+  if (serverReachable && authRequired && (!hasToken || !tokenResp.validated)) {
     authGateVersion.textContent = `App: ${healthResp.data.version}  |  Extension: ${extVersion}`;
     authGateVersion.hidden = false;
     authGateTokenInput.focus();
