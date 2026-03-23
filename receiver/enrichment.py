@@ -544,6 +544,8 @@ class Enricher:
 
     # Coalescing TTL for touch/enqueue DB writes (seconds)
     _COALESCE_TTL = 60.0
+    # Max entries before lazy-pruning the coalescing map
+    _COALESCE_MAP_MAX_SIZE = 256
 
     def __init__(self, db=None, unifi=None):
         self.geoip = GeoIPEnricher()
@@ -591,8 +593,8 @@ class Enricher:
         ts = self._recently_touched.get(ip)
         if ts is not None and (now - ts) < self._COALESCE_TTL:
             return True
-        # Lazy prune: every 256 checks, remove expired entries
-        if len(self._recently_touched) > 256:
+        # Lazy prune: when map exceeds threshold, remove expired entries
+        if len(self._recently_touched) > self._COALESCE_MAP_MAX_SIZE:
             cutoff = now - self._COALESCE_TTL
             self._recently_touched = {
                 k: v for k, v in self._recently_touched.items() if v > cutoff

@@ -248,6 +248,8 @@ window.addEventListener('uli-ready', async function () {
         if (resp.error) {
           console.warn('[ULI][Flow] BATCH_THREAT_LOOKUP error:', resp.error);
         }
+        // Partial results are accepted intentionally — some IPs may succeed while
+        // others fail (e.g., rate-limited). We enrich what we can.
         if (!resp.data || Object.keys(resp.data).length === 0) return;
         threatData = resp.data;
       } catch (e) {

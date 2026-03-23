@@ -108,9 +108,11 @@ async function discover() {
 }
 
 // Set up 401 handler — show auth error badge
-setAuthErrorHandler(() => {
-  swWarn('API returned 401 — authentication required');
+setAuthErrorHandler(async () => {
+  swWarn('API returned 401 — token revoked or expired');
   setBadge('!', '#f87171');
+  // Mark token as invalidated so popup shows auth gate on next open
+  try { await chrome.storage.local.set({ apiTokenValidated: false }); } catch (err) { swWarn('failed to persist apiTokenValidated:', err?.message); }
 });
 
 /**

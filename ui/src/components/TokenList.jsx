@@ -2,7 +2,13 @@
  * Shared active-token list used by SettingsAPI and SettingsMCP.
  * Shows first `pageSize` tokens with pagination controls.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+
+function formatTokenSummary(t, formatPrefix) {
+  const prefix = formatPrefix ? formatPrefix(t) : (t.token_prefix ? `${t.token_prefix}…` : t.client_type || 'token')
+  const scopes = t.scopes?.length ? t.scopes.join(', ') : 'no scopes'
+  return `${prefix} · ${scopes}`
+}
 
 // PropTypes not used in this project. Date values come from own API (Python
 // isoformat) — defensive validation against own server is unnecessary.
@@ -11,11 +17,6 @@ export default function TokenList({ tokens = [], onRevoke, formatPrefix, revokin
   const totalPages = Math.max(1, Math.ceil(tokens.length / pageSize))
   const safePage = Math.max(0, Math.min(page, totalPages - 1))
   const visible = tokens.slice(safePage * pageSize, (safePage + 1) * pageSize)
-
-  useEffect(() => {
-    const clampedPage = Math.max(0, Math.min(page, totalPages - 1))
-    if (clampedPage !== page) setPage(clampedPage)
-  }, [page, totalPages])
 
   return (
     <div className="space-y-2">
@@ -29,13 +30,8 @@ export default function TokenList({ tokens = [], onRevoke, formatPrefix, revokin
         >
           <div className="min-w-0">
             <p className="text-base text-gray-200 font-medium truncate">{t.name}</p>
-            {/* IIFE keeps prefix/scopes computation local to where it's rendered */}
             <p className="text-xs text-gray-500 font-mono truncate">
-              {(() => {
-                const prefix = formatPrefix ? formatPrefix(t) : (t.token_prefix ? `${t.token_prefix}…` : t.client_type)
-                const scopes = t.scopes?.length ? t.scopes.join(', ') : 'no scopes'
-                return `${prefix} · ${scopes}`
-              })()}
+              {formatTokenSummary(t, formatPrefix)}
             </p>
             <p className="text-xs text-gray-600">
               Created {t.created_at ? new Date(t.created_at).toLocaleString() : 'unknown'}

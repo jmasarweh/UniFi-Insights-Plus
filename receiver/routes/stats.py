@@ -188,10 +188,7 @@ def _get_bucket(time_range):
         '90d': 'week',
         '180d': 'month', '365d': 'month',
     }
-    bucket = bucket_map.get(time_range, 'day')
-    if bucket not in ('hour', 'day', 'week', 'month'):
-        bucket = 'day'
-    return bucket
+    return bucket_map.get(time_range, 'day')
 
 
 def _query_logs_over_time(cur, cutoff, bucket):

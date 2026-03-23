@@ -1070,13 +1070,16 @@ class UniFiAPI:
                 self._db.upsert_unifi_devices(devices)
 
             # Persist poll status so the API process can read it
-            self._db.set_config('unifi_poll_status', {
-                'connected': True,
-                'last_poll': last_poll.isoformat(),
-                'last_error': None,
-                'client_count': len(clients),
-                'device_count': len(devices),
-            })
+            try:
+                self._db.set_config('unifi_poll_status', {
+                    'connected': True,
+                    'last_poll': last_poll.isoformat(),
+                    'last_error': None,
+                    'client_count': len(clients),
+                    'device_count': len(devices),
+                })
+            except Exception as db_err:
+                logger.error("Failed to persist poll success status: %s", db_err)
             logger.info("UniFi poll: %d clients, %d devices synced",
                         len(clients), len(devices))
             return True

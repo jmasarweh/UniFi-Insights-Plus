@@ -479,6 +479,8 @@ export async function authLogout() {
   return resp.json().catch(() => ({}))
 }
 
+// Bypasses apiFetch intentionally — /auth/me must work before login
+// (checking session) so it cannot use the shared error-handling wrapper.
 // Error includes statusText intentionally — richer than status alone for debugging.
 // body.detail covers all FastAPI error payloads; body.error is not used by this API.
 export async function fetchAuthMe() {

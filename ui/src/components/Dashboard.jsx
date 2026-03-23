@@ -424,7 +424,12 @@ export default function Dashboard({ maxFilterDays }) {
           <div className="border border-gray-800 rounded-lg p-4 min-h-[8rem]">
             <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">Log Types</div>
             <div className="flex flex-wrap gap-1.5">
-              {stats.by_type && Object.entries(stats.by_type).map(([t, c]) => (
+              {stats.by_type && Object.entries(stats.by_type)
+                .sort(([a], [b]) => {
+                  const order = ['firewall', 'dns', 'dhcp', 'wifi', 'system']
+                  return (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b))
+                })
+                .map(([t, c]) => (
                 <span key={t} className={`inline-block px-2 py-1 rounded text-xs font-semibold uppercase border ${LOG_TYPE_STYLES[t] || LOG_TYPE_STYLES.system}`}>
                   {t} {formatNumber(c)}
                 </span>
