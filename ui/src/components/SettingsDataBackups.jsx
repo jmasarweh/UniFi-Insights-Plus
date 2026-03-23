@@ -198,7 +198,7 @@ function MigrationWizard() {
               <div>
                 <label htmlFor="mig-dbname" className="block text-sm font-medium text-gray-200 mb-1">Database Name</label>
                 <input id="mig-dbname" value={form.dbname} readOnly
-                  className="w-full px-3 py-1.5 rounded bg-black/50 border border-gray-700 text-sm text-gray-500 cursor-not-allowed" />
+                  className="w-full px-3 py-1.5 rounded bg-black/50 border border-gray-700 text-sm text-gray-400 cursor-not-allowed" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

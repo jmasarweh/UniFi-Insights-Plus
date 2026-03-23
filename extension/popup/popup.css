@@ -51,8 +51,8 @@ body::-webkit-scrollbar {
 }
 
 .logo {
-  width: 24px;
   height: 24px;
+  width: auto;
 }
 
 .header-status {

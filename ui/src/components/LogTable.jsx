@@ -315,7 +315,7 @@ export default function LogTable({ logs, loading, expandedId, detailedLog, onTog
           ) : logs.length === 0 ? (
             <tr>
               <td colSpan={colCount} className="text-center py-12 text-gray-500 text-sm">
-                No logs match current filters
+                No logs match current filters. Try a wider time range or check that syslog logging is enabled for this traffic on your gateway.
               </td>
             </tr>
           ) : (

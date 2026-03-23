@@ -8,7 +8,7 @@ const DARK_INPUT_CLS = 'w-full rounded-md border border-zinc-800 bg-black px-4 p
 // so isHttps is always true or false, never undefined. No guard needed.
 // Post-unmount state updates are harmless in React 18 (no warning).
 // PropTypes not used in this project.
-export default function Login({ onSuccess, isHttps, proxyTrusted, theme, version }) {
+export default function Login({ onSuccess, isHttps, proxyTrusted, isEmbedded, theme, version }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -39,7 +39,9 @@ export default function Login({ onSuccess, isHttps, proxyTrusted, theme, version
         {isHttps === false && (
           <div className={`mb-4 rounded-2xl px-4 py-3 text-sm shadow-sm ${isDark ? 'border border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border border-amber-300 bg-amber-50 text-amber-900'}`}>
             {proxyTrusted === false
-              ? 'Unable to verify a secure connection. Your reverse proxy may not be sending the required X-ULI-Proxy-Auth header. Check the authentication docs for proxy configuration.'
+              ? isEmbedded
+                ? 'Unable to verify a secure connection. Your browser extension may still be configured to use HTTP. Update the extension\'s server URL to use HTTPS, or check your reverse proxy configuration.'
+                : 'Unable to verify a secure connection. Your reverse proxy may not be sending the required X-ULI-Proxy-Auth header. Check the authentication docs for proxy configuration.'
               : 'Authentication requires HTTPS. Please access the app through a reverse proxy with TLS enabled.'}
           </div>
         )}

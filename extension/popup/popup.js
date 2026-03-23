@@ -59,6 +59,7 @@ const tokenError = document.getElementById('token-error');
 
 let initialTabInjection = true;
 let initialFlowEnrichment = true;
+let detectedAuthRequired = false;
 const PERMISSION_RETRY_DELAYS_MS = [0, 120, 300, 700];
 const POPUP_LOG_PREFIX = '[ULI][Popup]';
 // Loaded by url-utils.js <script> in popup.html — always available.
@@ -239,6 +240,16 @@ function showSetup() {
   setupView.hidden = false;
   connectedView.hidden = true;
   authGateView.hidden = true;
+  const sep = document.querySelector('.port-sep');
+  if (detectedAuthRequired) {
+    hostInput.placeholder = 'https://logs.yourdomain.com';
+    portInput.hidden = true;
+    if (sep) sep.hidden = true;
+  } else {
+    hostInput.placeholder = '192.168.1.50';
+    portInput.hidden = false;
+    if (sep) sep.hidden = false;
+  }
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -250,8 +261,16 @@ connectBtn.addEventListener('click', async () => {
   }
 
   // HTTPS full URLs use as-is (standard port 443); bare IPs/hostnames get port appended
+  // When auth is required, default to https and skip port
   const isHttps = /^https:\/\//i.test(host);
-  const url = isHttps ? host.replace(/\/+$/, '') : normalizeUrl(`${host}:${port}`, 'http');
+  let url;
+  if (isHttps) {
+    url = host.replace(/\/+$/, '');
+  } else if (detectedAuthRequired) {
+    url = normalizeUrl(host, 'https');
+  } else {
+    url = normalizeUrl(`${host}:${port}`, 'http');
+  }
 
   try {
     new URL(url);
@@ -334,12 +353,24 @@ async function showConnected(settings) {
   const serverReachable = healthResp.ok && healthResp.data;
   const authRequired = trafficResp.authRequired;
   const hasToken = tokenResp.ok && tokenResp.token;
+  detectedAuthRequired = !!authRequired;
 
   // Auth gate: server reachable, requires auth, and either no token or token was revoked
   if (serverReachable && authRequired && (!hasToken || !tokenResp.validated)) {
+    const isHttp = baseUrl.startsWith('http://');
+    if (isHttp) {
+      authGateError.textContent = 'Authentication requires HTTPS. Click "Reset Extension" below and reconnect using your external HTTPS address (e.g. https://logs.yourdomain.com).';
+      authGateError.hidden = false;
+      authGateTokenInput.disabled = true;
+      authGateSaveBtn.disabled = true;
+    } else {
+      authGateError.hidden = true;
+      authGateTokenInput.disabled = false;
+      authGateSaveBtn.disabled = false;
+    }
     authGateVersion.textContent = `App: ${healthResp.data.version}  |  Extension: ${extVersion}`;
     authGateVersion.hidden = false;
-    authGateTokenInput.focus();
+    if (!isHttp) authGateTokenInput.focus();
     authGateView.hidden = false;
     return;
   }

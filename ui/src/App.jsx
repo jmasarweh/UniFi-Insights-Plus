@@ -266,10 +266,6 @@ export default function App() {
         }
 
         if (!status.auth_enabled_effective) {
-          // Still warn about missing proxy header — affects HTTPS detection & IP forwarding
-          if (!status.proxy_trusted && !sessionStorage.getItem('proxy_toast_dismissed')) {
-            setShowProxyToast(true)
-          }
           setAuthState('none')
           return
         }
@@ -507,6 +503,7 @@ export default function App() {
       <Login
         isHttps={authStatus?.is_https}
         proxyTrusted={authStatus?.proxy_trusted}
+        isEmbedded={isEmbedded}
         theme={theme}
         version={health?.version}
         onSuccess={() => setAuthState('authenticated')}
