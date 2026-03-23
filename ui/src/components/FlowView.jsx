@@ -459,7 +459,7 @@ export default function FlowView({ maxFilterDays }) {
               filters={filters}
               onClose={() => { setExpandedRow(null); setHostSearchInput(''); setHostHistory([]) }}
               onPeerClick={(ip) => {
-                setHostHistory(prev => [...prev, expandedRow.ip])
+                setHostHistory(prev => { const next = [...prev, expandedRow.ip]; return next.length > 50 ? next.slice(next.length - 50) : next })
                 setExpandedRow({ ip, rowIndex: -1 })
                 setHostSearchInput(ip)
               }}

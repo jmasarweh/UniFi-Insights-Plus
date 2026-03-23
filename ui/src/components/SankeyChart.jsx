@@ -124,6 +124,7 @@ export default function SankeyChart({ filters, refreshKey, onNodeClick, activeFi
     const disc = [filters.time_range, filters.time_from, filters.time_to, filters.rule_action, filters.direction, dims.join(','), n, hostIp || ''].join('|')
     const cached = readCache('sankey', disc)
     if (cached && refreshKey === refreshKeyRef.current) {
+      refreshKeyRef.current = refreshKey
       setData(cached)
       setLoading(false)
       onDataLoaded?.(requestKey)
