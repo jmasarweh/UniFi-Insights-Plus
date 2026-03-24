@@ -11,6 +11,7 @@ from psycopg2.extras import RealDictCursor, Json
 
 from db import get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
+from firewall_policy_matcher import invalidate_cache as invalidate_fw_cache
 from parsers import (
     VPN_PREFIX_BADGES, VPN_INTERFACE_PREFIXES, VPN_BADGE_CHOICES,
     VPN_BADGE_LABELS, VPN_PREFIX_DESCRIPTIONS,
@@ -238,6 +239,9 @@ def complete_setup(body: dict):
     new_wan = set(body["wan_interfaces"])
     if new_wan != current_wan:
         set_config(enricher_db, "direction_backfill_pending", True)
+
+    # Invalidate firewall snapshot cache — VPN/WAN config affects zone map
+    invalidate_fw_cache()
 
     # Signal receiver process to reload config
     signal_receiver()
@@ -547,6 +551,7 @@ def save_vpn_networks(body: dict):
         else:
             labels.pop(iface, None)
     set_config(enricher_db, 'interface_labels', labels)
+    invalidate_fw_cache()
     signal_receiver()
     return {"success": True}
 

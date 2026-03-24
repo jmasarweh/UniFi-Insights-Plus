@@ -217,6 +217,18 @@ export async function patchFirewallPolicy(policyId, loggingEnabled, origin) {
   })
 }
 
+export async function matchFirewallPolicyForLog(log) {
+  return apiFetch(`${BASE}/firewall/policies/match-log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      interface_in: log.interface_in || '',
+      interface_out: log.interface_out || '',
+      rule_name: log.rule_name || '',
+    })
+  })
+}
+
 export async function bulkUpdateFirewallLogging(policies) {
   return apiFetch(`${BASE}/firewall/policies/bulk-logging`, {
     method: 'POST',
