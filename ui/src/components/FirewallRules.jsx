@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { fetchFirewallPolicies, patchFirewallPolicy, bulkUpdateFirewallLoggingStream } from '../api'
+import { isControllablePolicy, SYSLOG_DELAY_WARNING } from '../lib/firewallPolicyLogging'
+import SyslogToggle from './SyslogToggle'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,9 +114,7 @@ function isReturnBlanket(policy, zoneKeys) {
 function getDefaultAction(policies) {
   // Baseline considers USER_DEFINED + SYSTEM_DEFINED (enabled only).
   // DERIVED policies are device-specific auto-rules and don't set zone-pair posture.
-  const candidates = policies.filter(p =>
-    p.enabled !== false && p.metadata?.origin !== 'DERIVED'
-  )
+  const candidates = policies.filter(isControllablePolicy)
 
   if (candidates.length === 0) {
     return policies.length > 0 ? 'Block All' : null
@@ -190,36 +190,8 @@ function cellStyle(action, selected) {
   }
 }
 
-// ── Toggle Switch (matches UniFi: 32×16 track, 14×14 knob) ─────────────────
-
-function SyslogToggle({ checked, disabled, onChange, title }) {
-  return (
-    <button
-      onClick={() => !disabled && onChange(!checked)}
-      disabled={disabled}
-      className="relative"
-      aria-label="Toggle syslog"
-      title={title}
-    >
-      <div
-        className={`w-8 h-4 rounded-full transition-colors duration-200 ${
-          disabled
-            ? (checked ? 'bg-teal-800' : 'bg-[#282b2f]')
-            : (checked ? 'bg-teal-500' : 'bg-[#42474d]')
-        } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-      >
-        <div
-          className="absolute top-[1px] w-[14px] h-[14px] rounded-full bg-white"
-          style={{
-            left: checked ? '17px' : '1px',
-            transition: 'left .25s cubic-bezier(.8, 0, .6, 1.4)',
-            boxShadow: '0 4px 12px 0 rgba(0,0,0,.4), 0 0 1px 0 hsla(214,8%,98%,.08)',
-          }}
-        />
-      </div>
-    </button>
-  )
-}
+// ── Toggle Switch ────────────────────────────────────────────────────────────
+// Shared component: ui/src/components/SyslogToggle.jsx
 
 // ── ZoneMatrix ───────────────────────────────────────────────────────────────
 
@@ -420,7 +392,7 @@ function PolicyRow({ policy, zoneMap, onToggle, toggling, isSubRow }) {
   const isDisabled = policy.enabled === false
   const action = policy.action?.type || ''
   const logging = policy.loggingEnabled
-  const canToggle = !isDerived && !isDisabled && !toggling
+  const canToggle = isControllablePolicy(policy) && !toggling
 
   return (
     <tr className={`border-b border-white/[0.07] hover:bg-white/[0.02] ${isDisabled ? 'opacity-40 pointer-events-none' : ''}`}>
@@ -488,9 +460,7 @@ function GroupHeaderRow({ group, expanded, onToggle, onToggleExpand, toggling })
   ))
   const uniformProtocol = protocols.size === 1 ? [...protocols][0] : null
 
-  const controllable = policies.filter(p =>
-    p.metadata?.origin !== 'DERIVED' && p.enabled !== false
-  )
+  const controllable = policies.filter(isControllablePolicy)
   const enabledCount = controllable.filter(p => p.loggingEnabled).length
   const allEnabled = enabledCount === controllable.length && controllable.length > 0
   const noneEnabled = enabledCount === 0
@@ -582,7 +552,7 @@ function BulkConfirmModal({ action, count, srcZone, dstZone, onConfirm, onCancel
                 </p>
               )}
               <p className="text-sm text-[#cbced2]">
-                Changes are applied immediately on the UniFi Gateway but may take up to 5 minutes to reflect in the Log Stream.
+                {SYSLOG_DELAY_WARNING}
               </p>
               {action === 'disable' && !srcZone && (
                 <div className="px-3 py-2 rounded border border-[#f0383b]/40 bg-[#f0383b]/10 text-[#f0383b] text-xs">
@@ -765,9 +735,7 @@ export default function FirewallRules() {
 
   const { controllableTotal, controllableLoggingEnabled } = useMemo(() => {
     if (!data?.policies) return { controllableTotal: 0, controllableLoggingEnabled: 0 }
-    const controllable = data.policies.filter(p =>
-      p.metadata?.origin !== 'DERIVED' && p.enabled !== false
-    )
+    const controllable = data.policies.filter(isControllablePolicy)
     return {
       controllableTotal: controllable.length,
       controllableLoggingEnabled: controllable.filter(p => p.loggingEnabled).length,
@@ -775,9 +743,7 @@ export default function FirewallRules() {
   }, [data])
 
   const { allEnabled, allDisabled } = useMemo(() => {
-    const controllable = filteredPolicies.filter(p =>
-      p.metadata?.origin !== 'DERIVED' && p.enabled !== false
-    )
+    const controllable = filteredPolicies.filter(isControllablePolicy)
     // No controllable policies → both true so both buttons are disabled
     if (!controllable.length) return { allEnabled: true, allDisabled: true }
     return {
@@ -819,9 +785,7 @@ export default function FirewallRules() {
 
   async function handleGroupToggle(group, enableAll) {
     const eligible = group.policies.filter(p =>
-      p.metadata?.origin !== 'DERIVED' &&
-      p.enabled !== false &&
-      p.loggingEnabled !== enableAll
+      isControllablePolicy(p) && p.loggingEnabled !== enableAll
     )
     if (!eligible.length) return
 
@@ -842,9 +806,7 @@ export default function FirewallRules() {
 
   function handleBulkAction(enableAll) {
     const eligible = filteredPolicies.filter(p =>
-      p.metadata?.origin !== 'DERIVED' &&
-      p.enabled !== false &&
-      p.loggingEnabled !== enableAll
+      isControllablePolicy(p) && p.loggingEnabled !== enableAll
     )
     if (!eligible.length) return
     setPendingBulk({ enableAll, eligible })

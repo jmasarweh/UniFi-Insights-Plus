@@ -14,6 +14,9 @@ from psycopg2.extras import RealDictCursor
 
 from db import get_config, set_config, encrypt_api_key, decrypt_api_key
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver
+from firewall_policy_matcher import (
+    match_log_to_policy, invalidate_cache as invalidate_fw_cache,
+)
 from unifi_api import UniFiPermissionError
 
 logger = logging.getLogger('api.unifi')
@@ -66,6 +69,7 @@ def update_unifi_settings(body: dict):
         set_config(enricher_db, 'unifi_features', body['features'])
 
     unifi_api.reload_config()
+    invalidate_fw_cache()
     signal_receiver()
 
     return {"success": True}
@@ -249,6 +253,7 @@ def patch_firewall_policy(policy_id: str, body: dict):
 
     try:
         result = unifi_api.patch_firewall_policy(policy_id, logging_enabled)
+        invalidate_fw_cache()
         return {"success": True, "data": result}
     except UniFiPermissionError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
@@ -278,7 +283,9 @@ def bulk_update_logging(body: dict):
         raise HTTPException(status_code=400, detail="policies list is required")
 
     try:
-        return unifi_api.bulk_patch_logging(policies)
+        result = unifi_api.bulk_patch_logging(policies)
+        invalidate_fw_cache()
+        return result
     except UniFiPermissionError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except Exception as e:
@@ -309,6 +316,7 @@ def bulk_update_logging_stream(body: dict):
         def run_bulk():
             try:
                 result = unifi_api.bulk_patch_logging(policies, progress_callback=on_progress)
+                invalidate_fw_cache()
                 q.put({'event': 'complete', **result})
             except UniFiPermissionError as e:
                 q.put({'event': 'error', 'detail': str(e)})
@@ -332,6 +340,46 @@ def bulk_update_logging_stream(body: dict):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Log-to-Policy Matching ────────────────────────────────────────────────
+
+def _get_vpn_networks():
+    """Read VPN networks from system_config. Returns dict or empty dict."""
+    vpn_raw = get_config(enricher_db, 'vpn_networks')
+    if not vpn_raw:
+        return {}
+    try:
+        return json.loads(vpn_raw) if isinstance(vpn_raw, str) else vpn_raw
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse vpn_networks from system_config")
+        return {}
+
+
+@router.post("/api/firewall/policies/match-log")
+def match_log_to_policy_route(body: dict):
+    """Match a firewall log entry to a policy for syslog toggle.
+
+    Returns {"status": "disabled"} when UniFi/firewall_management is off,
+    avoiding the need for unifiEnabled prop drilling in the frontend.
+    """
+    if not unifi_api.enabled:
+        return {"status": "disabled"}
+    if not unifi_api.features.get('firewall_management', True):
+        return {"status": "disabled"}
+
+    try:
+        return match_log_to_policy(
+            unifi_api,
+            interface_in=body.get('interface_in', ''),
+            interface_out=body.get('interface_out', ''),
+            rule_name=body.get('rule_name', ''),
+            vpn_networks=_get_vpn_networks(),
+        )
+    except Exception as e:
+        logger.exception("Policy match failed")
+        return {"status": "error", "message": str(e)}
+
 
 
 # ── Phase 2: Device Endpoints ────────────────────────────────────────────

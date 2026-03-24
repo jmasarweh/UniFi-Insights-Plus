@@ -640,6 +640,7 @@ class UniFiAPI:
                 name = net.get('name', '')
                 iface = 'br0' if vlan_id == 1 else f'br{vlan_id}'
                 networks.append({
+                    'id': net.get('id'),
                     'name': name,
                     'interface': iface,
                     'vlan': vlan_id,
@@ -658,6 +659,7 @@ class UniFiAPI:
                 vlan_id = vlan if vlan and vlan_enabled else 1
                 iface = 'br0' if vlan_id == 1 else f'br{vlan_id}'
                 networks.append({
+                    'id': net.get('_id'),
                     'name': net.get('name', ''),
                     'interface': iface,
                     'vlan': vlan_id,

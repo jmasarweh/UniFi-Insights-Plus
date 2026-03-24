@@ -1,29 +1,24 @@
 import React, { useState, useEffect } from 'react'
 import { FlagIcon, getInterfaceName, decodeThreatCategories, isPrivateIP, formatServiceName, normalizeRuleDesc } from '../utils'
 import { getThreatLevel } from '../lib/threatPresentation'
-import { fetchAbuseIPDBStatus, enrichIP } from '../api'
+import { parseRuleName } from '../lib/firewallPolicyLogging'
+import { fetchAbuseIPDBStatus, enrichIP, matchFirewallPolicyForLog, patchFirewallPolicy } from '../api'
+import SyslogToggle from './SyslogToggle'
 import CopyButton from './CopyButton'
 
 const TEAL = 'text-teal-500 hover:text-teal-400'
-
-function parseRuleName(ruleName) {
-  if (!ruleName) return null
-  // Format: CHAIN-ACTION_CODE-PRIORITY e.g. "WAN_LOCAL-D-2147483647"
-  const m = ruleName.match(/^(.+?)-(A|D|R)-(\d+)$/)
-  if (!m) return null
-  const actionMap = { 'A': 'Allow', 'D': 'Drop', 'R': 'Redirect' }
-  return {
-    chain: m[1],
-    action: actionMap[m[2]] || m[2],
-    priority: m[3],
-  }
-}
 
 export default function LogDetail({ log, hiddenColumns = new Set() }) {
   const [enriching, setEnriching] = useState(false)
   const [enrichError, setEnrichError] = useState(null)
   const [enrichedData, setEnrichedData] = useState(null)
   const [budget, setBudget] = useState(null)
+
+  // Rule logging policy match state
+  const [policyMatch, setPolicyMatch] = useState(null)
+  const [policyLoading, setPolicyLoading] = useState(false)
+  const [toggling, setToggling] = useState(false)
+  const [toggleError, setToggleError] = useState(null)
 
   // Determine which IP to enrich — the remote party, not our infrastructure
   function getEnrichableIP() {
@@ -52,6 +47,40 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
       .then(s => setBudget(s.remaining))
       .catch(() => setBudget(null))
   }, [canEnrich])
+
+  // Match firewall log to policy for syslog toggle
+  const canMatchPolicy = log?.log_type === 'firewall' && log?.rule_name && parseRuleName(log.rule_name)
+  useEffect(() => {
+    if (!canMatchPolicy) return
+    setPolicyLoading(true)
+    setPolicyMatch(null)
+    setToggleError(null)
+    matchFirewallPolicyForLog(log)
+      .then(setPolicyMatch)
+      .catch(() => setPolicyMatch({ status: 'error', message: 'Failed to check policy.' }))
+      .finally(() => setPolicyLoading(false))
+  }, [log?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleToggleLogging = async (newVal) => {
+    if (!policyMatch?.policy) return
+    const { id, origin } = policyMatch.policy
+    setToggling(true)
+    setToggleError(null)
+    try {
+      await patchFirewallPolicy(id, newVal, origin)
+      // Optimistic local update — same pattern as FirewallRules matrix.
+      // Do NOT re-fetch from UniFi here; rapid follow-up requests within
+      // 2 seconds cause the controller to silently discard the PATCH.
+      setPolicyMatch(prev => ({
+        ...prev,
+        policy: { ...prev.policy, loggingEnabled: newVal },
+      }))
+    } catch (err) {
+      setToggleError(err.message || 'Failed to toggle logging.')
+    } finally {
+      setToggling(false)
+    }
+  }
 
   if (!log) return null
 
@@ -228,6 +257,50 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
           <div key="rule_desc">
             <span className="text-gray-400 text-[12px] uppercase tracking-wider">Rule Description</span>
             <div className="text-gray-300 text-sm mt-0.5">{desc}</div>
+          </div>
+        )
+      }
+
+      // Rule logging toggle — inline after Rule Description
+      if (canMatchPolicy) {
+        const zoneLabel = policyMatch?.policy?.srcZone && policyMatch?.policy?.dstZone
+          ? `${policyMatch.policy.srcZone} → ${policyMatch.policy.dstZone}`
+          : ''
+        sections.push(
+          <div key="rule_logging">
+            <span className="text-gray-400 text-[12px] uppercase tracking-wider">Rule Logging</span>
+            <div className="mt-0.5">
+              {policyLoading && (
+                <span className="text-sm text-gray-500">Checking...</span>
+              )}
+              {!policyLoading && policyMatch?.status === 'matched' && (
+                <div className="flex items-center gap-2">
+                  <SyslogToggle
+                    checked={policyMatch.policy.loggingEnabled}
+                    disabled={toggling}
+                    onChange={handleToggleLogging}
+                    title={policyMatch.policy.loggingEnabled ? 'Disable logging' : 'Enable logging'}
+                  />
+                  {zoneLabel && <span className="text-sm text-gray-300">{zoneLabel}</span>}
+                  {toggleError && <span className="text-xs text-red-400">{toggleError}</span>}
+                </div>
+              )}
+              {!policyLoading && policyMatch?.status === 'unmatched' && (
+                <span className="text-sm text-gray-500">{policyMatch.message}</span>
+              )}
+              {!policyLoading && policyMatch?.status === 'ambiguous' && (
+                <span className="text-sm text-yellow-400/80">{policyMatch.message}</span>
+              )}
+              {!policyLoading && policyMatch?.status === 'uncontrollable' && (
+                <span className="text-sm text-gray-500">{policyMatch.message}{policyMatch.policy?.name ? ` (${policyMatch.policy.name})` : ''}</span>
+              )}
+              {!policyLoading && policyMatch?.status === 'unsupported' && (
+                <span className="text-sm text-gray-500">{policyMatch.message}</span>
+              )}
+              {!policyLoading && policyMatch?.status === 'error' && (
+                <span className="text-sm text-red-400">{policyMatch.message}</span>
+              )}
+            </div>
           </div>
         )
       }
