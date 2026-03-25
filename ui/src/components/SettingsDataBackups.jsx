@@ -24,6 +24,12 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
 }
 
+function formatLabelList(values) {
+  if (values.length <= 1) return values[0] || ''
+  if (values.length === 2) return `${values[0]} and ${values[1]}`
+  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`
+}
+
 // ── Step pill for migration wizard ──────────────────────────────────────────
 
 const WIZARD_STEPS = ['Configure', 'Migration', 'Required Manual Tasks']
@@ -708,9 +714,25 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
     }
   }
 
-  const disabledTypes = []
-  if (processingSettings?.wifi_processing_enabled === false) disabledTypes.push('WIFI')
-  if (processingSettings?.system_processing_enabled === false) disabledTypes.push('System')
+  const processingWarning = useMemo(() => {
+    if (!processingSettings) return null
+
+    const disabledTypes = [
+      { settingKey: 'wifi_processing_enabled', countKey: 'wifi', label: 'WIFI' },
+      { settingKey: 'system_processing_enabled', countKey: 'system', label: 'System' },
+    ].filter(({ settingKey }) => processingSettings[settingKey] === false)
+
+    if (disabledTypes.length === 0) return null
+
+    const discardedTypes = formatLabelList(disabledTypes.map(({ label }) => label))
+    const visibleTypes = formatLabelList(
+      disabledTypes
+        .filter(({ countKey }) => (logCounts?.[countKey] ?? 0) > 0)
+        .map(({ label }) => label)
+    )
+
+    return { discardedTypes, visibleTypes }
+  }, [logCounts, processingSettings])
 
   return (
     <div className="space-y-8">
@@ -989,8 +1011,13 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
                   {processingStatus.type === 'saved' ? 'Settings saved' : processingStatus.text}
                 </span>
               )}
-              {!processingStatus && disabledTypes.length > 0 && (
-                <span className="text-sm text-gray-500">New {disabledTypes.join(' and ')} logs will be discarded. Existing records are still visible &mdash; use Log Cleanup above to remove them.</span>
+              {!processingStatus && processingWarning && (
+                <span className="text-sm text-gray-500">
+                  New {processingWarning.discardedTypes} logs will be discarded.
+                  {processingWarning.visibleTypes && (
+                    <> Existing {processingWarning.visibleTypes} records are still visible &mdash; use Log Cleanup above to remove them.</>
+                  )}
+                </span>
               )}
             </div>
             <button
