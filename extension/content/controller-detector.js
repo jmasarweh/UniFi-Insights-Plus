@@ -17,41 +17,29 @@
   guard.style.display = 'none';
   document.documentElement.appendChild(guard);
 
-  // Wait for the SPA to render the portal header (up to 15s)
-  const header = await waitForElement('header[class*="unifi-portal"]', 15000);
-  if (!header) return;
+  // Wait indefinitely for the SPA to render the portal header.
+  // The header may not exist yet on the login page — it appears only after
+  // authentication completes (SPA route change, no full reload).
+  // The observer is cleaned up on pagehide or once the header is found.
+  const header = await waitForElement('header[class*="unifi-portal"]');
+  if (!header) return; // only if page is unloading
 
-  // Fetch extension config from service worker
-  let config;
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
-    if (!resp || !resp.ok) {
-      console.debug('[ULI] GET_CONFIG returned non-ok:', resp);
-      return;
-    }
-    config = resp.data;
-  } catch (e) {
-    console.debug('[ULI] GET_CONFIG failed:', e);
-    return;
-  }
-
-  // Fetch the Log Insight base URL
-  let baseUrl = '';
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'GET_BASE_URL' });
-    if (resp && resp.ok) baseUrl = resp.url || '';
-  } catch (e) {
-    console.debug('[ULI] GET_BASE_URL failed:', e);
-  }
-
-  // Store config globally for the other content scripts
-  window.__uliConfig = { ...config, baseUrl };
+  if (!window.__uliUtils?.ensureConfig) return;
+  const config = await window.__uliUtils.ensureConfig();
+  if (!config) return;
 
   // Signal that detection is complete — other scripts are listening
+  window.__uliReady = true;
   window.dispatchEvent(new CustomEvent('uli-ready'));
 })();
 
-function waitForElement(selector, timeout) {
+/**
+ * Wait for an element matching `selector` to appear in the DOM.
+ * Watches indefinitely via MutationObserver until found or the page fires
+ * pagehide (which occurs both when the page is discarded/unloaded and when
+ * it enters bfcache). Returns null in either case.
+ */
+function waitForElement(selector) {
   return new Promise((resolve) => {
     const el = document.querySelector(selector);
     if (el) { resolve(el); return; }
@@ -59,10 +47,13 @@ function waitForElement(selector, timeout) {
     let settled = false;
     const observer = new MutationObserver(() => {
       const found = document.querySelector(selector);
-      if (found && !settled) { settled = true; clearTimeout(timerId); observer.disconnect(); resolve(found); }
+      if (found && !settled) { settled = true; observer.disconnect(); resolve(found); }
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    const timerId = setTimeout(() => { if (!settled) { settled = true; observer.disconnect(); resolve(null); } }, timeout);
+    // Clean up on pagehide (page discard or bfcache entry) if the element never appeared
+    window.addEventListener('pagehide', () => {
+      if (!settled) { settled = true; observer.disconnect(); resolve(null); }
+    }, { once: true });
   });
 }

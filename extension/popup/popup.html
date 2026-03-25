@@ -36,7 +36,9 @@
         <span>API Key Required</span>
       </div>
 
-      <div class="section-card">
+      <p id="auth-gate-https-warning" class="error" hidden aria-live="polite"></p>
+
+      <div id="auth-gate-token-card" class="section-card" hidden>
         <div class="section-header">
           <span class="section-title">API Token</span>
           <span class="status-pill pending">Required</span>
@@ -118,7 +120,7 @@
       </div>
 
       <!-- API Token Section -->
-      <div class="section-card">
+      <div id="token-section" class="section-card">
         <div class="section-header">
           <span class="section-title">API Token</span>
           <span id="token-status" class="status-pill" hidden></span>

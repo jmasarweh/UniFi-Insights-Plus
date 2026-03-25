@@ -51,6 +51,23 @@ async function _authFetch(url, options = {}) {
 }
 
 /**
+ * Check if authentication is enabled on the server.
+ * Uses the public /api/auth/status endpoint (no token required).
+ */
+export async function fetchAuthStatus(url) {
+  const target = url || baseUrl;
+  if (!target) return null;
+  try {
+    const resp = await fetch(`${target}/api/auth/status`, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (err) {
+    console.debug('[ULI][API] auth status check failed:', target, err?.message);
+    return null;
+  }
+}
+
+/**
  * Check if the Log Insight server is reachable and return health data.
  */
 export async function checkHealth(url) {

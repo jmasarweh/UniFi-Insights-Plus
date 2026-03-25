@@ -360,6 +360,20 @@ export async function runRetentionCleanup() {
   return apiFetch(`${BASE}/config/retention/cleanup`, { method: 'POST' })
 }
 
+// ── Log Counts & Purge ──────────────────────────────────────────────────────
+
+export async function fetchLogCountsByType() {
+  return apiFetch(`${BASE}/logs/counts-by-type`)
+}
+
+export async function purgeLogsByType(logType) {
+  return apiFetch(`${BASE}/config/purge-logs/${encodeURIComponent(logType)}`, { method: 'DELETE' })
+}
+
+export async function fetchPurgeStatus() {
+  return apiFetch(`${BASE}/config/purge-status`)
+}
+
 // ── UI Settings ─────────────────────────────────────────────────────────
 
 export async function fetchUiSettings() {

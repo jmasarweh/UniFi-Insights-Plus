@@ -27,7 +27,10 @@ const RESET_FILTERS = {
   log_type: null, rule_action: null, direction: null, vpn_only: null,
 }
 
-export default function FilterBar({ filters, onChange, maxFilterDays, prefetchedInterfaces }) {
+export default function FilterBar({ filters, onChange, maxFilterDays, prefetchedInterfaces, hiddenLogTypes }) {
+  const visibleLogTypes = hiddenLogTypes?.size
+    ? LOG_TYPES.filter(t => !hiddenLogTypes.has(t))
+    : LOG_TYPES
   const [ipSearch, setIpSearch] = useState(filters.ip || '')
   const [ruleSearch, setRuleSearch] = useState(filters.rule_name || '')
   const [textSearch, setTextSearch] = useState(filters.search || '')
@@ -175,15 +178,25 @@ export default function FilterBar({ filters, onChange, maxFilterDays, prefetched
     }
   }, [maxFilterDays]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Strip hidden types from active filter on prop change
+  useEffect(() => {
+    if (!hiddenLogTypes?.size || !filters.log_type) return
+    const current = filters.log_type.split(',')
+    const cleaned = current.filter(t => !hiddenLogTypes.has(t))
+    if (cleaned.length !== current.length) {
+      wrappedOnChange({ ...filters, log_type: cleaned.length === visibleLogTypes.length ? null : cleaned.join(',') || null })
+    }
+  }, [hiddenLogTypes]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleType = (type) => {
-    const current = filters.log_type ? filters.log_type.split(',') : LOG_TYPES
+    const current = filters.log_type ? filters.log_type.split(',') : visibleLogTypes
     const updated = current.includes(type)
       ? current.filter(t => t !== type)
       : [...current, type]
-    wrappedOnChange({ ...filters, log_type: updated.length === LOG_TYPES.length ? null : updated.join(',') })
+    wrappedOnChange({ ...filters, log_type: updated.length === visibleLogTypes.length ? null : updated.join(',') })
   }
 
-  const activeTypes = filters.log_type ? filters.log_type.split(',') : LOG_TYPES
+  const activeTypes = filters.log_type ? filters.log_type.split(',') : visibleLogTypes
   const activeActions = filters.rule_action ? filters.rule_action.split(',') : ACTIONS
   const activeDirections = filters.direction ? filters.direction.split(',') : DIRECTIONS
 
@@ -247,7 +260,7 @@ export default function FilterBar({ filters, onChange, maxFilterDays, prefetched
       {/* Row 1: Log types + time range */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-1.5">
-          {LOG_TYPES.map(type => (
+          {visibleLogTypes.map(type => (
             <button
               key={type}
               onClick={() => toggleType(type)}

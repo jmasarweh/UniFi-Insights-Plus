@@ -334,7 +334,7 @@ export default function SettingsOverlay({ onClose, startInReconfig, initialSecti
                   />
                 )}
                 {activeSection === 'data-backups' && (
-                  <SettingsDataBackups totalLogs={totalLogs} storage={storage} />
+                  <SettingsDataBackups totalLogs={totalLogs} storage={storage} onSaved={onUiSettingsChanged} />
                 )}
                 {activeSection === 'user-interface' && (
                   <SettingsUserInterface onSaved={onUiSettingsChanged} />

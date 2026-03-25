@@ -6,7 +6,7 @@
  * detects the panel, extracts public IPs from the Source/Destination sections,
  * fetches threat data from the Log Insight cache, and injects enrichment rows.
  *
- * Activated by 'uli-ready' event from controller-detector.js.
+ * Boots independently after shared config is available.
  * Runs in content script isolated world (has chrome.runtime access).
  *
  * UniFi DOM (verified against UniFi Network 9.x):
@@ -17,11 +17,19 @@
  * - Theme: panel classes include -light or -dark suffixes
  */
 
-window.addEventListener('uli-ready', async function () {
-  const config = window.__uliConfig;
-  if (!config || !config.enableFlowEnrichment) return;
+;(async function bootstrap() {
+  if (window.__uliPanelEnricherStarted) return;
+  window.__uliPanelEnricherStarted = true;
+  window.__uliPanelEnricherBootstrap = bootstrap;
 
-  if (!window.__uliUtils) { console.warn('[ULI][Panel] shared-utils not loaded'); return; }
+  if (!window.__uliUtils?.ensureConfig) return;
+  const config = await window.__uliUtils.ensureConfig();
+  if (!config) {
+    window.__uliPanelEnricherStarted = false;
+    return;
+  }
+  if (!config.enableFlowEnrichment) return;
+
   const { ABUSE_CATEGORIES, IPV4_RE, isPrivateIP, getThreatLevel, escapeHtml, escapeAttr, detectTheme, navigateToIP, onThemeChange } = window.__uliUtils;
 
   let threatColors = null;
@@ -56,6 +64,7 @@ window.addEventListener('uli-ready', async function () {
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (panelObserver) { panelObserver.disconnect(); panelObserver = null; }
     themeObs.disconnect();
+    window.__uliPanelEnricherStarted = false;
   }
   window.addEventListener('pagehide', teardown, { once: true });
 
@@ -270,5 +279,11 @@ window.addEventListener('uli-ready', async function () {
 
   function buildRow(label, valueHtml) {
     return `<div class="row"><span class="label">${escapeHtml(label)}</span><span class="value">${valueHtml}</span></div>`;
+  }
+})();
+// BFCache restore: re-bootstrap when the page is restored from cache.
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && !window.__uliPanelEnricherStarted) {
+    window.__uliPanelEnricherBootstrap?.();
   }
 });

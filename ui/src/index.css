@@ -476,7 +476,9 @@ select:-webkit-autofill {
 [data-theme="light"] .bg-teal-500.text-white,
 [data-theme="light"] .bg-blue-600.text-white,
 [data-theme="light"] .bg-blue-500.text-white,
+[data-theme="light"] .bg-red-500.text-white,
 [data-theme="light"] .bg-red-600.text-white,
+[data-theme="light"] .hover\:bg-red-600:hover.text-white,
 [data-theme="light"] .bg-\[\#4797ff\].text-white,
 [data-theme="light"] .hover\:bg-teal-500:hover.text-white { color: #fff; }
 
@@ -734,6 +736,23 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 @media (prefers-reduced-motion: reduce) {
   .paused-glow::after { animation: none; box-shadow: inset 0 0 22px 5px rgba(251, 191, 36, 0.3); }
   [data-theme="light"] .paused-glow::after { animation: none; box-shadow: inset 0 0 22px 5px rgba(146, 64, 14, 0.2); }
+}
+
+/* ─── Purge progress shimmer ─────────────────────────────────────── */
+@keyframes purge-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.purge-progress-text {
+  background: linear-gradient(90deg, #a8b2bf 0%, #a8b2bf 40%, #14b8a6 50%, #a8b2bf 60%, #a8b2bf 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: purge-shimmer 1.5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .purge-progress-text { animation: none; -webkit-text-fill-color: #14b8a6; }
 }
 
 /* ─── Threat Map Sidebar ──────────────────────────────────────────── */

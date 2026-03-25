@@ -1,7 +1,7 @@
 import '../lib/url-utils.js';
 import { DEFAULT_BASE_URL, THREAT_COLORS } from '../lib/constants.js';
 import { getSettings, saveSettings, setCache, getApiToken, saveApiToken, clearApiToken, getApiTokenValidated } from '../lib/storage.js';
-import { checkHealth, fetchUniFiSettings, batchThreatLookup, fetchTrafficStats, setBaseUrl, getBaseUrl, setAuthToken, getAuthToken, setAuthErrorHandler } from '../lib/api-client.js';
+import { checkHealth, fetchAuthStatus, fetchUniFiSettings, batchThreatLookup, fetchTrafficStats, setBaseUrl, getBaseUrl, setAuthToken, getAuthToken, setAuthErrorHandler } from '../lib/api-client.js';
 
 const SW_LOG_PREFIX = '[ULI][SW]';
 const PERMISSION_RETRY_DELAYS_MS = [0, 150, 350, 800, 1200];
@@ -88,13 +88,24 @@ async function discover() {
       }
     }
 
-    // Try default localhost
-    const health = await checkHealth(DEFAULT_BASE_URL);
-    if (health) {
-      setBaseUrl(DEFAULT_BASE_URL);
-      await saveSettings({ logInsightUrl: DEFAULT_BASE_URL });
-      await onConnected(health, { ...settings, logInsightUrl: DEFAULT_BASE_URL });
-      return;
+    // Try default localhost — check auth status first to decide whether to store
+    const authStatus = await fetchAuthStatus(DEFAULT_BASE_URL);
+    if (authStatus) {
+      // Server is reachable. If auth is enabled, don't store the HTTP URL —
+      // popup will detect auth and show HTTPS setup field.
+      if (authStatus.auth_enabled_effective) {
+        swLog('auth enabled on default HTTP URL — deferring to popup for HTTPS setup');
+        setBadge('?', '#fbbf24');
+        return;
+      }
+      // Auth disabled — safe to store HTTP URL and proceed
+      const health = await checkHealth(DEFAULT_BASE_URL);
+      if (health) {
+        setBaseUrl(DEFAULT_BASE_URL);
+        await saveSettings({ logInsightUrl: DEFAULT_BASE_URL });
+        await onConnected(health, { ...settings, logInsightUrl: DEFAULT_BASE_URL });
+        return;
+      }
     }
 
     // Not found — popup will prompt user
@@ -288,6 +299,11 @@ async function handleMessage(msg) {
     case 'HEALTH_CHECK': {
       const health = await checkHealth(msg.url || undefined);
       return { ok: !!health, data: health };
+    }
+
+    case 'AUTH_STATUS': {
+      const status = await fetchAuthStatus(msg.url || undefined);
+      return { ok: !!status, data: status };
     }
 
     case 'TRAFFIC_STATS': {

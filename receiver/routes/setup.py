@@ -3,6 +3,7 @@
 import ipaddress as _ipaddress
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -327,6 +328,8 @@ _UI_SETTINGS_DEFAULTS = {
     'ui_theme': 'dark',
     'ui_block_highlight': 'on',
     'ui_block_highlight_threshold': 0,
+    'wifi_processing_enabled': True,
+    'system_processing_enabled': True,
 }
 
 _UI_SETTINGS_VALID = {
@@ -335,7 +338,12 @@ _UI_SETTINGS_VALID = {
     'ui_theme': {'dark', 'light'},
     'ui_block_highlight': {'on', 'off'},
     'ui_block_highlight_threshold': (0, 100),
+    'wifi_processing_enabled': {True, False},
+    'system_processing_enabled': {True, False},
 }
+
+# Keys that trigger a receiver reload (SIGUSR2) when changed via PUT /api/settings/ui
+_PROCESSING_KEYS = {'wifi_processing_enabled', 'system_processing_enabled'}
 
 
 # ── Config Export/Import ─────────────────────────────────────────────────────
@@ -654,6 +662,152 @@ def run_retention_cleanup_now():
     return {"success": True, "deleted": deleted}
 
 
+_PURGEABLE_LOG_TYPES = {'wifi', 'system'}
+_PURGE_BATCH_SIZE = 5000
+_PURGE_RESULT_TTL = 30  # seconds to keep complete/failed status before clearing
+
+# In-memory purge job tracker per log_type.
+# States: running → complete | failed.  Cleared after _PURGE_RESULT_TTL.
+_purge_jobs: dict = {}
+_purge_lock = threading.Lock()
+
+
+def _now_ts():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _purge_gc():
+    """Remove finished jobs older than _PURGE_RESULT_TTL.  Caller must hold _purge_lock."""
+    now = datetime.now(timezone.utc)
+    expired = [
+        lt for lt, job in _purge_jobs.items()
+        if job['status'] in ('complete', 'failed')
+        and (now - datetime.fromisoformat(job['finished_at'])).total_seconds() > _PURGE_RESULT_TTL
+    ]
+    for lt in expired:
+        del _purge_jobs[lt]
+
+
+def _run_purge(log_type: str, total_rows: int, max_id: int):
+    """Background worker that deletes logs in batches and updates _purge_jobs.
+
+    Only deletes rows with id <= max_id so new inserts during the purge are not affected.
+    """
+    batch_size = _PURGE_BATCH_SIZE
+    total_batches = (total_rows + batch_size - 1) // batch_size
+    log_type_upper = log_type.upper()
+    total_deleted = 0
+    conn = get_conn()
+    try:
+        batch_num = 0
+        with conn.cursor() as cur:
+            while True:
+                try:
+                    cur.execute(
+                        "DELETE FROM logs WHERE id IN ("
+                        "  SELECT id FROM logs WHERE log_type = %s AND id <= %s"
+                        "  ORDER BY id FOR UPDATE SKIP LOCKED LIMIT %s"
+                        ")",
+                        [log_type, max_id, batch_size]
+                    )
+                    batch = cur.rowcount
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    logger.exception("PURGE %s: batch %d/%d — ERROR: %s",
+                                     log_type_upper, batch_num, total_batches, e)
+                    raise
+                if batch == 0:
+                    break
+                batch_num += 1
+                total_deleted += batch
+                # Recalculate total_batches from actual progress so SKIP LOCKED
+                # underfills don't push batch_num past the displayed total.
+                remaining = total_rows - total_deleted
+                if remaining > 0:
+                    total_batches = batch_num + (remaining + batch_size - 1) // batch_size
+                else:
+                    total_batches = batch_num
+                with _purge_lock:
+                    _purge_jobs[log_type].update(batch=batch_num, total_batches=total_batches,
+                                                 deleted_so_far=total_deleted, last_updated_at=_now_ts())
+                logger.info("PURGE %s: batch %d/%d — deleted %s rows (total so far: %s)",
+                            log_type_upper, batch_num, total_batches,
+                            f"{batch:,}", f"{total_deleted:,}")
+        now = _now_ts()
+        with _purge_lock:
+            _purge_jobs[log_type].update(status='complete', deleted_so_far=total_deleted,
+                                         last_updated_at=now, finished_at=now)
+        logger.info("PURGE %s: completed — %s records deleted", log_type_upper, f"{total_deleted:,}")
+    except Exception as e:
+        now = _now_ts()
+        with _purge_lock:
+            _purge_jobs[log_type].update(status='failed', error=str(e),
+                                         last_updated_at=now, finished_at=now)
+        logger.exception("PURGE %s: failed after %s deleted rows", log_type_upper, f"{total_deleted:,}")
+    finally:
+        put_conn(conn)
+
+
+@router.delete("/api/config/purge-logs/{log_type}")
+def purge_logs_by_type(log_type: str):
+    """Start background deletion of all logs of a given type.
+
+    Returns immediately.  Poll GET /api/config/purge-status for progress.
+    """
+    if log_type not in _PURGEABLE_LOG_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid log type: {log_type}. Must be one of: {', '.join(sorted(_PURGEABLE_LOG_TYPES))}")
+    with _purge_lock:
+        _purge_gc()
+        existing = _purge_jobs.get(log_type)
+        if existing and existing['status'] == 'running':
+            raise HTTPException(status_code=409, detail=f"Purge already in progress for {log_type}")
+    # Snapshot count and max id — only rows up to this id will be deleted,
+    # so new inserts arriving during the purge are not chased.
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*), MAX(id) FROM logs WHERE log_type = %s", [log_type])
+            total_rows, max_id = cur.fetchone()
+        conn.commit()
+    finally:
+        put_conn(conn)
+    if total_rows == 0:
+        logger.info("PURGE %s: 0 records, nothing to delete", log_type.upper())
+        return {"success": True, "deleted": 0, "status": "complete"}
+    total_batches = (total_rows + _PURGE_BATCH_SIZE - 1) // _PURGE_BATCH_SIZE
+    now = _now_ts()
+    with _purge_lock:
+        _purge_jobs[log_type] = {
+            'status': 'running',
+            'batch': 0,
+            'total_batches': total_batches,
+            'deleted_so_far': 0,
+            'total_rows': total_rows,
+            'error': None,
+            'started_at': now,
+            'last_updated_at': now,
+            'finished_at': None,
+        }
+    logger.info("PURGE %s: starting deletion of %s records (id <= %s) in ~%d batches",
+                 log_type.upper(), f"{total_rows:,}", f"{max_id:,}", total_batches)
+    t = threading.Thread(target=_run_purge, args=(log_type, total_rows, max_id), daemon=True)
+    t.start()
+    return {"success": True, "status": "running", "total_rows": total_rows, "total_batches": total_batches}
+
+
+@router.get("/api/config/purge-status")
+def get_purge_status():
+    """Return current purge job status for all log types.
+
+    Finished jobs are auto-cleared after _PURGE_RESULT_TTL seconds.
+    Log types with no active or recent job are omitted (implicitly idle).
+    """
+    with _purge_lock:
+        _purge_gc()
+        return {lt: dict(job) for lt, job in _purge_jobs.items()}
+
+
 def _estimate_log_counts() -> dict:
     """Estimate total log count for each retention slider step.
 
@@ -700,6 +854,7 @@ def get_ui_settings():
 @router.put("/api/settings/ui")
 def update_ui_settings(body: dict):
     """Save UI display settings to system_config."""
+    actually_changed_processing = False
     for key, constraint in _UI_SETTINGS_VALID.items():
         if key not in body:
             continue
@@ -715,5 +870,13 @@ def update_ui_settings(body: dict):
             lo, hi = constraint
             if not (lo <= val <= hi):
                 raise HTTPException(400, f"{key} must be between {lo} and {hi}")
+        # Track whether a processing key actually changed value
+        if key in _PROCESSING_KEYS:
+            current = get_config(enricher_db, key, _UI_SETTINGS_DEFAULTS[key])
+            if val != current:
+                actually_changed_processing = True
         set_config(enricher_db, key, val)
+    # Signal receiver to reload only when processing settings actually changed
+    if actually_changed_processing:
+        signal_receiver()
     return {"success": True}

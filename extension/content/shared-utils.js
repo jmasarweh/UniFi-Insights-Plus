@@ -10,6 +10,8 @@
  * Canonical source for constants: lib/constants.js (keep in sync).
  */
 (() => {
+  let configPromise = null;
+
   // AbuseIPDB category code -> human-readable label
   const ABUSE_CATEGORIES = {
     1: 'DNS Compromise', 2: 'DNS Poisoning', 3: 'Fraud Orders', 4: 'DDoS Attack',
@@ -123,6 +125,47 @@
   }
 
   /**
+   * Load extension config into the shared content-script window cache.
+   * Multiple callers share the same in-flight request.
+   */
+  async function ensureConfig() {
+    if (window.__uliConfig) return window.__uliConfig;
+    if (configPromise) return configPromise;
+
+    configPromise = (async () => {
+      let config;
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_CONFIG' });
+        if (!resp || !resp.ok) {
+          console.debug('[ULI] GET_CONFIG returned non-ok:', resp);
+          return null;
+        }
+        config = resp.data;
+      } catch (e) {
+        console.debug('[ULI] GET_CONFIG failed:', e);
+        return null;
+      }
+
+      let baseUrl = '';
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_BASE_URL' });
+        if (resp && resp.ok) baseUrl = resp.url || '';
+      } catch (e) {
+        console.debug('[ULI] GET_BASE_URL failed:', e);
+      }
+
+      window.__uliConfig = { ...config, baseUrl };
+      return window.__uliConfig;
+    })();
+
+    const resolved = await configPromise;
+    if (!resolved) {
+      configPromise = null;
+    }
+    return resolved;
+  }
+
+  /**
    * Observe UniFi theme changes. UniFi re-renders the React tree on toggle,
    * replacing the header element. Debounced MutationObserver on document.body
    * detects the new header and fires the callback when the theme flips.
@@ -157,5 +200,6 @@
     escapeAttr,
     navigateToIP,
     onThemeChange,
+    ensureConfig,
   });
 })();

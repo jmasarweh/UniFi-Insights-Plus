@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { fetchLogs, fetchLog, getExportUrl } from '../api'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { fetchLogs, fetchLog, getExportUrl, fetchLogCountsByType } from '../api'
 import { TR_KEY } from '../utils'
 import FilterBar from './FilterBar'
 import LogTable from './LogTable'
@@ -95,6 +95,23 @@ export default function LogStream({ version, latestRelease, maxFilterDays, drill
   const scrollRef = useRef(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [drillContext, setDrillContext] = useState(null)
+
+  // Derive hidden log types: processing disabled AND confirmed zero records in DB
+  // null = unknown (fetch pending/failed) — keep badges visible until confirmed zero
+  const [logTypeCounts, setLogTypeCounts] = useState(null)
+  const wifiDisabled = uiSettings?.wifi_processing_enabled === false
+  const systemDisabled = uiSettings?.system_processing_enabled === false
+  useEffect(() => {
+    if (!wifiDisabled && !systemDisabled) { setLogTypeCounts(null); return }
+    fetchLogCountsByType().then(setLogTypeCounts).catch(err => console.error('Failed to load log counts:', err))
+  }, [wifiDisabled, systemDisabled])
+  const hiddenLogTypes = useMemo(() => {
+    const hidden = new Set()
+    if (!logTypeCounts) return hidden // unknown → keep all visible
+    if (wifiDisabled && logTypeCounts.wifi === 0) hidden.add('wifi')
+    if (systemDisabled && logTypeCounts.system === 0) hidden.add('system')
+    return hidden
+  }, [wifiDisabled, systemDisabled, logTypeCounts])
 
   // Apply drill filters from FlowView (F1/F4/F8)
   useEffect(() => {
@@ -290,7 +307,7 @@ export default function LogStream({ version, latestRelease, maxFilterDays, drill
       )}
       {/* Filters */}
       <div className="px-4 py-2.5 border-b border-gray-800 bg-gray-950 relative z-20">
-        <FilterBar filters={filters} onChange={handleFilterChange} maxFilterDays={maxFilterDays} prefetchedInterfaces={prefetchedInterfaces} />
+        <FilterBar filters={filters} onChange={handleFilterChange} maxFilterDays={maxFilterDays} prefetchedInterfaces={prefetchedInterfaces} hiddenLogTypes={hiddenLogTypes} />
       </div>
 
       {/* Toolbar */}

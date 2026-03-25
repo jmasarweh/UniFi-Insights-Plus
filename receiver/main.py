@@ -73,11 +73,24 @@ class SyslogReceiver:
         self.stats = {
             'received': 0,
             'parsed': 0,
+            'filtered': 0,
             'failed': 0,
             'inserted': 0,
             'flush_errors': 0,
             'dropped': 0,
         }
+        self._load_disabled_types()
+
+    def _load_disabled_types(self):
+        """Load set of log types that should be silently discarded."""
+        disabled = set()
+        if not get_config(self.db, 'wifi_processing_enabled', True):
+            disabled.add('wifi')
+        if not get_config(self.db, 'system_processing_enabled', True):
+            disabled.add('system')
+        self._disabled_log_types = disabled
+        if disabled:
+            logger.info("Log type filtering active: discarding %s", disabled)
 
     def start(self):
         """Start the UDP listener."""
@@ -143,6 +156,12 @@ class SyslogReceiver:
 
         self.stats['parsed'] += 1
 
+        # Filter disabled log types before enrichment
+        log_type = parsed.get('log_type')
+        if log_type in self._disabled_log_types:
+            self.stats['filtered'] += 1
+            return
+
         # Enrich with GeoIP, ASN, AbuseIPDB, rDNS
         parsed = self.enricher.enrich(parsed)
 
@@ -201,9 +220,9 @@ class SyslogReceiver:
         self.last_heartbeat = now
 
         silence = now - self.last_receive_time if self.last_receive_time else 0
-        logger.debug("Heartbeat — received=%d parsed=%d inserted=%d dropped=%d flush_errors=%d silence=%.0fs",
-                     self.stats['received'], self.stats['parsed'], self.stats['inserted'],
-                     self.stats['dropped'], self.stats['flush_errors'], silence)
+        logger.debug("Heartbeat — received=%d parsed=%d filtered=%d inserted=%d dropped=%d flush_errors=%d silence=%.0fs",
+                     self.stats['received'], self.stats['parsed'], self.stats['filtered'],
+                     self.stats['inserted'], self.stats['dropped'], self.stats['flush_errors'], silence)
 
         # Warn if no packets received for a long time (gateway may have stopped sending)
         if self.last_receive_time and silence > 30:
@@ -367,6 +386,7 @@ def main():
         logger.info("Received SIGUSR2, reloading config from database...")
         parsers.reload_config_from_db(db)
         unifi_api.reload_config()
+        receiver._load_disabled_types()
 
         # Write timestamp to confirm reload completed
         try:

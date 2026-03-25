@@ -7,6 +7,8 @@ const authGateView = document.getElementById('auth-gate-view');
 const authGateTokenInput = document.getElementById('auth-gate-token-input');
 const authGateSaveBtn = document.getElementById('auth-gate-save-btn');
 const authGateError = document.getElementById('auth-gate-error');
+const authGateHttpsWarning = document.getElementById('auth-gate-https-warning');
+const authGateTokenCard = document.getElementById('auth-gate-token-card');
 const authGateDisconnectBtn = document.getElementById('auth-gate-disconnect-btn');
 const authGateVersion = document.getElementById('auth-gate-version');
 
@@ -47,6 +49,7 @@ const reloadBar = document.getElementById('reload-bar');
 const reloadBtn = document.getElementById('reload-btn');
 const disconnectBtn = document.getElementById('disconnect-btn');
 
+const tokenSection = document.getElementById('token-section');
 const tokenStatus = document.getElementById('token-status');
 const tokenDisplay = document.getElementById('token-display');
 const tokenPreview = document.getElementById('token-preview');
@@ -59,7 +62,8 @@ const tokenError = document.getElementById('token-error');
 
 let initialTabInjection = true;
 let initialFlowEnrichment = true;
-let detectedAuthRequired = false;
+let setupAuthHint = false;    // localhost probe result — setup view only
+let serverAuthEnabled = false; // /api/auth/status on connected server — token section visibility
 const PERMISSION_RETRY_DELAYS_MS = [0, 120, 300, 700];
 const POPUP_LOG_PREFIX = '[ULI][Popup]';
 // Loaded by url-utils.js <script> in popup.html — always available.
@@ -190,6 +194,21 @@ async function hasPermissionWithRetry(origin, delaysMs = PERMISSION_RETRY_DELAYS
   return false;
 }
 
+/** Probe localhost for auth status and re-render setup view if the hint changes. */
+async function refreshSetupAuthHint() {
+  try {
+    const authResp = await chrome.runtime.sendMessage({ type: 'AUTH_STATUS', url: 'http://localhost:8090' });
+    const hint = !!(authResp.ok && authResp.data && authResp.data.auth_enabled_effective);
+    if (hint !== setupAuthHint) {
+      setupAuthHint = hint;
+      // Only re-render if setup view is still active (avoid clobbering connected/auth-gate)
+      if (!setupView.hidden) showSetup();
+    }
+  } catch (err) {
+    console.debug('[ULI][Popup] localhost auth probe failed:', err?.message);
+  }
+}
+
 function setControllerPermissionState(hasPermission) {
   controllerStatus.hidden = false;
   if (hasPermission) {
@@ -223,7 +242,9 @@ async function init() {
     toggleEnrich.checked = initialFlowEnrichment;
 
     if (!settings.logInsightUrl || !settings.configured) {
+      setupAuthHint = false;
       showSetup();
+      refreshSetupAuthHint(); // async — re-renders if hint changes
       return;
     }
 
@@ -241,8 +262,8 @@ function showSetup() {
   connectedView.hidden = true;
   authGateView.hidden = true;
   const sep = document.querySelector('.port-sep');
-  if (detectedAuthRequired) {
-    hostInput.placeholder = 'https://logs.yourdomain.com';
+  if (setupAuthHint) {
+    hostInput.placeholder = 'https://insightsplus.local';
     portInput.hidden = true;
     if (sep) sep.hidden = true;
   } else {
@@ -262,7 +283,7 @@ connectBtn.addEventListener('click', async () => {
 
   // HTTPS full URLs use as-is (standard port 443); bare IPs/hostnames get port appended
   // When auth is required, default to https and skip port
-  if (detectedAuthRequired && /^http:\/\//i.test(host)) {
+  if (setupAuthHint && /^http:\/\//i.test(host)) {
     showSetupError('Authentication requires HTTPS. Remove http:// or use https://.');
     return;
   }
@@ -270,7 +291,7 @@ connectBtn.addEventListener('click', async () => {
   let url;
   if (isHttps) {
     url = host.replace(/\/+$/, '');
-  } else if (detectedAuthRequired) {
+  } else if (setupAuthHint) {
     url = normalizeUrl(host, 'https');
   } else {
     url = normalizeUrl(`${host}:${port}`, 'http');
@@ -332,11 +353,12 @@ async function showConnected(settings) {
 
   // Check if auth is required and no token is configured.
   // Use allSettled so one failure doesn't discard the others.
-  let healthResp = {}, trafficResp = {}, tokenResp = {};
-  const [healthResult, trafficResult, tokenResult] = await Promise.allSettled([
+  let healthResp = {}, trafficResp = {}, tokenResp = {}, authStatusResp = {};
+  const [healthResult, trafficResult, tokenResult, authStatusResult] = await Promise.allSettled([
     chrome.runtime.sendMessage({ type: 'HEALTH_CHECK' }),
     chrome.runtime.sendMessage({ type: 'TRAFFIC_STATS' }),
     chrome.runtime.sendMessage({ type: 'GET_API_TOKEN' }),
+    chrome.runtime.sendMessage({ type: 'AUTH_STATUS' }), // no url → uses configured server (cf. refreshSetupAuthHint for localhost probe)
   ]);
   if (healthResult.status === 'fulfilled') {
     healthResp = healthResult.value || {};
@@ -353,24 +375,31 @@ async function showConnected(settings) {
   } else {
     popupWarn('GET_API_TOKEN failed:', tokenResult.reason?.message);
   }
+  if (authStatusResult.status === 'fulfilled') {
+    authStatusResp = authStatusResult.value || {};
+  } else {
+    popupWarn('AUTH_STATUS failed:', authStatusResult.reason?.message);
+  }
 
   const serverReachable = healthResp.ok && healthResp.data;
-  const authRequired = trafficResp.authRequired;
+  const authRejected = !!trafficResp.authRequired; // 401 from traffic stats
   const hasToken = tokenResp.ok && tokenResp.token;
-  detectedAuthRequired = !!authRequired;
 
-  // Auth gate: server reachable, requires auth, and either no token or token was revoked
-  if (serverReachable && authRequired && (!hasToken || !tokenResp.validated)) {
+  // Determine auth state from /api/auth/status, fall back to protocol heuristic
+  serverAuthEnabled = (authStatusResp.ok && authStatusResp.data)
+    ? !!authStatusResp.data.auth_enabled_effective
+    : /^https:\/\//i.test(baseUrl);
+
+  // Auth gate: server reachable, auth rejected (401), and either no token or token was revoked
+  if (serverReachable && authRejected && (!hasToken || !tokenResp.validated)) {
     const isHttp = /^http:\/\//i.test(baseUrl);
     if (isHttp) {
-      authGateError.textContent = 'Authentication requires HTTPS. Click "Reset Extension" below and reconnect using your external HTTPS address (e.g. https://logs.yourdomain.com).';
-      authGateError.hidden = false;
-      authGateTokenInput.disabled = true;
-      authGateSaveBtn.disabled = true;
+      authGateHttpsWarning.textContent = 'Authentication requires HTTPS. Click "Reset Extension" below and reconnect using your Insights Plus app HTTPS address (e.g. https://insightsplus.local).';
+      authGateHttpsWarning.hidden = false;
+      authGateTokenCard.hidden = true;
     } else {
-      authGateError.hidden = true;
-      authGateTokenInput.disabled = false;
-      authGateSaveBtn.disabled = false;
+      authGateHttpsWarning.hidden = true;
+      authGateTokenCard.hidden = false;
     }
     authGateVersion.textContent = `App: ${healthResp.data.version}  |  Extension: ${extVersion}`;
     authGateVersion.hidden = false;
@@ -448,6 +477,9 @@ async function showConnected(settings) {
     renderDirections(t.by_direction || {});
     trafficOverview.hidden = false;
   }
+
+  // Hide token section entirely when auth is not enabled on the server
+  tokenSection.hidden = !serverAuthEnabled;
 
   // API Token section — upgrade validation state if traffic stats succeeded
   const tokenValidated = tokenResp.validated !== false
@@ -668,7 +700,10 @@ async function performDisconnect() {
   await chrome.storage.sync.set({ logInsightUrl: '', controllerUrl: '', configured: false });
   await chrome.storage.local.remove(['pendingOrigin', 'health']);
   await chrome.runtime.sendMessage({ type: 'DISCONNECT' });
+  setupAuthHint = false;
+  serverAuthEnabled = false;
   showSetup();
+  refreshSetupAuthHint(); // async — re-renders if hint changes
 }
 
 disconnectBtn.addEventListener('click', performDisconnect);

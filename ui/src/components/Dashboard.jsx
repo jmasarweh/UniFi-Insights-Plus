@@ -7,6 +7,31 @@ import { readCache, writeCache, CACHE_TTL_MS } from '../lib/sessionCache'
 import NetworkBadge from './NetworkBadge'
 import useTimeRange from '../hooks/useTimeRange'
 
+function SkeletonRows({ count = 5, withBar = false }) {
+  return (
+    <div className="space-y-2">
+      {[...Array(count)].map((_, i) => (
+        <div key={i} className="space-y-1">
+          <div className="flex items-center justify-between">
+            <div className="h-3 bg-gray-800 rounded" style={{ width: `${60 - i * 6}%` }} />
+            <div className="h-3 w-10 bg-gray-800 rounded" />
+          </div>
+          {withBar && <div className="h-1.5 bg-gray-800 rounded-full" style={{ width: `${90 - i * 12}%` }} />}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CardSkeleton({ title, children }) {
+  return (
+    <div className="border border-gray-800 rounded-lg p-4">
+      <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">{title}</div>
+      <div className="animate-pulse">{children}</div>
+    </div>
+  )
+}
+
 export function DashboardSkeleton() {
   return (
     <div className="p-4 space-y-4 overflow-auto max-h-full animate-pulse">
@@ -221,10 +246,10 @@ function formatTimeAgo(isoStr) {
 
 function TopList({ title, items, renderItem }) {
   return (
-    <div className="border border-gray-800 rounded-lg p-4">
+    <div className="border border-gray-800 rounded-lg p-4 flex flex-col">
       <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">{title}</div>
       {items.length === 0 ? (
-        <div className="text-gray-400 text-xs py-4 text-center">No data for the selected time filter</div>
+        <div className="text-gray-400 text-sm flex flex-1 items-center justify-center">No data for the selected time filter</div>
       ) : (
         <div className="space-y-2">
           {items.map((item, i) => renderItem(item, i))}
@@ -420,9 +445,26 @@ export default function Dashboard({ maxFilterDays }) {
       ) : tierStatus.overview === 'error' ? (
         <div className="border border-red-800/50 rounded-lg p-4 text-center text-xs text-red-400">Failed to load overview data</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-pulse">
-          <div className="border border-gray-800 rounded-lg p-4 h-32" />
-          <div className="border border-gray-800 rounded-lg p-4 h-32" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <CardSkeleton title="Traffic Overview">
+            <div className="space-y-3">
+              <div className="flex items-baseline gap-2">
+                <div className="h-7 w-20 bg-gray-800 rounded" />
+                <div className="h-3 w-14 bg-gray-800 rounded" />
+              </div>
+              <div className="flex gap-2">
+                {[...Array(3)].map((_, i) => <div key={i} className="h-6 w-20 bg-gray-800 rounded" />)}
+              </div>
+              <div className="flex gap-2 pt-3 border-t border-gray-800/50">
+                {[...Array(4)].map((_, i) => <div key={i} className="h-6 w-24 bg-gray-800 rounded" />)}
+              </div>
+            </div>
+          </CardSkeleton>
+          <CardSkeleton title="Log Types">
+            <div className="flex flex-wrap gap-1.5">
+              {[...Array(4)].map((_, i) => <div key={i} className="h-6 w-24 bg-gray-800 rounded" />)}
+            </div>
+          </CardSkeleton>
         </div>
       )}
 
@@ -435,7 +477,9 @@ export default function Dashboard({ maxFilterDays }) {
       ) : tierStatus.charts === 'error' ? (
         <div className="border border-red-800/50 rounded-lg p-4 text-center text-xs text-red-400">Failed to load chart data</div>
       ) : tierStatus.charts === 'loading' ? (
-        <div className="border border-gray-800 rounded-lg p-4 h-40 animate-pulse" />
+        <CardSkeleton title="Traffic Over Time">
+          <div className="h-[140px]" />
+        </CardSkeleton>
       ) : null}
 
       {/* Traffic by action chart */}
@@ -458,15 +502,34 @@ export default function Dashboard({ maxFilterDays }) {
           <TrafficByActionChart data={stats.traffic_by_action} timeRange={timeRange} loading={tierStatus.charts === 'loading'} />
         </div>
       ) : tierStatus.charts === 'loading' ? (
-        <div className="border border-gray-800 rounded-lg p-4 h-52 animate-pulse" />
+        <CardSkeleton title="Traffic by Action">
+          <div className="h-[220px]" />
+        </CardSkeleton>
       ) : null}
 
       {/* Top lists grid */}
       {tierStatus.tables === 'loading' && !stats.top_threat_ips ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-pulse">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="border border-gray-800 rounded-lg p-4 h-48" />
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <CardSkeleton title="Top Threat IPs"><SkeletonRows count={5} /></CardSkeleton>
+          <CardSkeleton title="Top Blocked External IPs"><SkeletonRows count={5} withBar /></CardSkeleton>
+          <CardSkeleton title="Top Blocked Internal IPs"><SkeletonRows count={5} withBar /></CardSkeleton>
+          <CardSkeleton title="Top Active Internal IPs"><SkeletonRows count={5} withBar /></CardSkeleton>
+          <CardSkeleton title="Top Allowed Destinations"><SkeletonRows count={5} withBar /></CardSkeleton>
+          <CardSkeleton title="Top Countries">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="h-5 w-14 bg-gray-800 rounded" />
+                <SkeletonRows count={4} />
+              </div>
+              <div className="space-y-2">
+                <div className="h-5 w-14 bg-gray-800 rounded" />
+                <SkeletonRows count={4} />
+              </div>
+            </div>
+          </CardSkeleton>
+          <CardSkeleton title="Top Blocked Services"><SkeletonRows count={5} /></CardSkeleton>
+          <CardSkeleton title="Top Allowed Services"><SkeletonRows count={5} /></CardSkeleton>
+          <CardSkeleton title="Top DNS Queries"><SkeletonRows count={5} /></CardSkeleton>
         </div>
       ) : tierStatus.tables === 'error' && !stats.top_threat_ips ? (
         <div className="border border-red-800/50 rounded-lg p-4 text-center text-xs text-red-400">Failed to load table data</div>
@@ -591,12 +654,12 @@ export default function Dashboard({ maxFilterDays }) {
           )}
         />
 
-        <div className="border border-gray-800 rounded-lg p-4">
+        <div className="border border-gray-800 rounded-lg p-4 flex flex-col">
           <div className="text-xs text-gray-400 uppercase tracking-wider mb-3">Top Countries</div>
           {(() => {
             const blocked = stats.top_blocked_countries || []
             const allowed = stats.top_allowed_countries || []
-            if (blocked.length === 0 && allowed.length === 0) return <div className="text-gray-400 text-xs py-4 text-center">No data for the selected time filter</div>
+            if (blocked.length === 0 && allowed.length === 0) return <div className="text-gray-400 text-sm flex flex-1 items-center justify-center">No data for the selected time filter</div>
             return (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

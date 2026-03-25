@@ -361,6 +361,27 @@ def _annotate_logs(logs):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+@router.get("/api/logs/counts-by-type")
+def get_log_counts_by_type():
+    """Return record counts for wifi and system log types."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT log_type, COUNT(*) FROM logs WHERE log_type IN ('wifi', 'system') GROUP BY log_type"
+            )
+            rows = cur.fetchall()
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Error querying log counts by type")
+        raise HTTPException(status_code=500, detail="Failed to query log counts") from e
+    finally:
+        put_conn(conn)
+    counts = {r[0]: r[1] for r in rows}
+    return {"wifi": counts.get("wifi", 0), "system": counts.get("system", 0)}
+
+
 @router.get("/api/logs/{log_id}")
 def get_log(log_id: int):
     wan_ips = get_wan_ips_from_config(enricher_db)
