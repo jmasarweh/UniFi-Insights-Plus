@@ -70,16 +70,29 @@ def invalidate_cache():
     logger.debug("Firewall snapshot cache invalidated")
 
 
+def _vpn_cache_key(vpn_networks):
+    """Build a hashable key from vpn_networks for cache comparison."""
+    if not vpn_networks:
+        return ()
+    return tuple(sorted(vpn_networks.items(), key=lambda kv: kv[0]))
+
+
 def _get_snapshot(unifi_api, vpn_networks=None):
     """Return cached snapshot or build a fresh one.
 
     Thread-safe. The snapshot contains zone_data (zone map) and policies
     (raw firewall data from the Integration API). TTL is 5 minutes.
+    The cache is keyed on both TTL and vpn_networks so callers with
+    different VPN configs don't get stale zone data.
     """
     global _cached_snapshot
 
+    vpn_key = _vpn_cache_key(vpn_networks)
+
     with _cache_lock:
-        if _cached_snapshot and time.monotonic() < _cached_snapshot['expires_at']:
+        if (_cached_snapshot
+                and time.monotonic() < _cached_snapshot['expires_at']
+                and _cached_snapshot.get('vpn_key') == vpn_key):
             return _cached_snapshot
 
     # Build outside the lock to avoid blocking other threads during API calls.
@@ -93,6 +106,7 @@ def _get_snapshot(unifi_api, vpn_networks=None):
         'policies': fw_data.get('policies', []),
         'zones': fw_data.get('zones', []),
         'expires_at': time.monotonic() + _CACHE_TTL,
+        'vpn_key': vpn_key,
     }
 
     with _cache_lock:
@@ -138,9 +152,13 @@ def build_zone_map(unifi_api, vpn_networks=None):
     # WAN physical interfaces
     wan_interfaces = []
     for w in net_config.get('wan_interfaces', []):
+        name = w.get('name')
+        phys = w.get('physical_interface')
+        if not name or not phys:
+            continue
         wan_interfaces.append({
-            'name': w['name'],
-            'interface': w['physical_interface'],
+            'name': name,
+            'interface': phys,
             'active': w.get('active', False),
             'wan_ip': w.get('wan_ip'),
         })
@@ -149,6 +167,9 @@ def build_zone_map(unifi_api, vpn_networks=None):
     zone_map = []
     custom_idx = 0
     for z in zones:
+        zone_id = z.get('id')
+        if not zone_id:
+            continue
         zname = z.get('name', '')
         zname_lower = zname.lower()
 
@@ -197,7 +218,7 @@ def build_zone_map(unifi_api, vpn_networks=None):
         # Gateway zone has no interfaces (it's the gateway itself)
 
         zone_map.append({
-            'zone_id': z['id'],
+            'zone_id': zone_id,
             'zone_name': zname,
             'chain_name': chain,
             'origin': z.get('metadata', {}).get('origin', 'UNKNOWN'),

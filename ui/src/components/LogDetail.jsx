@@ -285,6 +285,9 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
                   {toggleError && <span className="text-xs text-red-400">{toggleError}</span>}
                 </div>
               )}
+              {!policyLoading && policyMatch?.status === 'disabled' && (
+                <span className="text-sm text-gray-500">{policyMatch.message || 'Firewall management is not enabled.'}</span>
+              )}
               {!policyLoading && policyMatch?.status === 'unmatched' && (
                 <span className="text-sm text-gray-500">{policyMatch.message}</span>
               )}
