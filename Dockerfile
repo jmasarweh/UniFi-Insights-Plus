@@ -35,7 +35,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 # Install geoipupdate from MaxMind
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && ARCH=$(dpkg --print-architecture) \
-    && curl -sSL "https://github.com/maxmind/geoipupdate/releases/download/v7.1.0/geoipupdate_7.1.0_linux_${ARCH}.deb" -o /tmp/geoipupdate.deb \
+    && curl -sSL "https://github.com/maxmind/geoipupdate/releases/download/v7.1.1/geoipupdate_7.1.1_linux_${ARCH}.deb" -o /tmp/geoipupdate.deb \
     && dpkg -i /tmp/geoipupdate.deb \
     && rm /tmp/geoipupdate.deb \
     && apt-get remove -y curl \
