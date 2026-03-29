@@ -27,20 +27,22 @@ def health():
             # causes persistent /api/health 503 errors via statement_timeout.
             # reltuples is updated by autovacuum and accurate to ~1% on active tables.
             cur.execute("""
-                SELECT
-                    COALESCE(GREATEST(c.reltuples::bigint, 0), 0) AS count,
-                    NULL::timestamptz  AS min_timestamp,
-                    NULL::timestamptz  AS max_timestamp
+                SELECT COALESCE(GREATEST(c.reltuples::bigint, 0), 0)
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE c.relname = 'logs'
                   AND n.nspname = 'public'
             """)
             row = cur.fetchone()
+            total = row[0] if row else 0
+
+            # MIN/MAX on idx_logs_timestamp btree: two index edge lookups (~1ms)
+            cur.execute("SELECT MIN(timestamp), MAX(timestamp) FROM logs")
+            row = cur.fetchone()
             if row is None:
-                total, oldest, latest = 0, None, None
+                oldest, latest = None, None
             else:
-                total, oldest, latest = row[0], row[1], row[2]
+                oldest, latest = row[0], row[1]
         conn.commit()
 
         # Retention days: system_config > env > default

@@ -271,17 +271,19 @@ class Database:
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )""",
             # Normalize protocol to lowercase for index optimization
-            # Idempotency check: skip full scan if data is already normalized (common case)
+            # Uses system_config marker to skip on subsequent boots (matches backfill pattern)
             """DO $$
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM logs
-    WHERE protocol IS NOT NULL
-      AND protocol != LOWER(protocol)
-    LIMIT 1
+  IF NOT EXISTS (
+    SELECT 1 FROM system_config
+    WHERE key = 'protocol_normalization_done'
+      AND value = 'true'::jsonb
   ) THEN
     UPDATE logs SET protocol = LOWER(protocol)
     WHERE protocol IS NOT NULL AND protocol != LOWER(protocol);
+    INSERT INTO system_config (key, value, updated_at)
+    VALUES ('protocol_normalization_done', 'true', NOW())
+    ON CONFLICT (key) DO UPDATE SET value = 'true', updated_at = NOW();
   END IF;
 END $$;""",
             # Legacy MCP tables — only create if not already migrated to api_tokens
