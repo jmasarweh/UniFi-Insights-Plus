@@ -18,12 +18,31 @@ router = APIRouter()
 
 @router.get("/api/health")
 def health():
+    """Return service health, log count estimate, retention config, and storage stats."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM logs")
+            # Use pg_class catalog estimate instead of COUNT(*) full scan.
+            # On large tables (100M+ rows) the exact COUNT takes 5-7s per call and
+            # causes persistent /api/health 503 errors via statement_timeout.
+            # reltuples is updated by autovacuum and accurate to ~1% on active tables.
+            cur.execute("""
+                SELECT COALESCE(GREATEST(c.reltuples::bigint, 0), 0)
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = 'logs'
+                  AND n.nspname = 'public'
+            """)
             row = cur.fetchone()
-            total, oldest, latest = row[0], row[1], row[2]
+            total = row[0] if row else 0
+
+            # MIN/MAX on idx_logs_timestamp btree: two index edge lookups (~1ms)
+            cur.execute("SELECT MIN(timestamp), MAX(timestamp) FROM logs")
+            row = cur.fetchone()
+            if row is None:
+                oldest, latest = None, None
+            else:
+                oldest, latest = row[0], row[1]
         conn.commit()
 
         # Retention days: system_config > env > default

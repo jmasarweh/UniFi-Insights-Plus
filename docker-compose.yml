@@ -4,6 +4,8 @@ services:
     pull_policy: always
     container_name: unifi-log-insight
     restart: unless-stopped
+    shm_size: '256mb'   # recommended for large databases with custom PostgreSQL tuning;
+                        # Docker default 64MB may be insufficient for parallel workers
     logging:
       driver: "json-file"
       options:

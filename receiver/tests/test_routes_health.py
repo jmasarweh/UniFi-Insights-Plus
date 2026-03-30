@@ -57,11 +57,16 @@ class TestHealthEndpoint:
         test_client, mock_deps, _mock_db = client
 
         # Mock the DB cursor to return log stats
+        # Health endpoint issues 3 queries: pg_class count, MIN/MAX timestamps, db size
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         oldest = datetime(2026, 1, 1, tzinfo=timezone.utc)
         latest = datetime(2026, 3, 5, tzinfo=timezone.utc)
-        mock_cursor.fetchone.return_value = (1000, oldest, latest)
+        mock_cursor.fetchone.side_effect = [
+            (1000,),            # pg_class reltuples count
+            (oldest, latest),   # MIN/MAX timestamps
+            (1024 * 1024,),     # pg_database_size
+        ]
         mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
         mock_deps.get_conn.return_value = mock_conn
@@ -72,6 +77,7 @@ class TestHealthEndpoint:
         assert data['status'] == 'ok'
         assert data['version'] == '3.1.0-test'
         assert data['total_logs'] == 1000
+        assert data['oldest_log_at'] == '2026-01-01T00:00:00+00:00'
         assert data['retention_days'] == 60  # default
 
     def test_health_db_failure(self, client):

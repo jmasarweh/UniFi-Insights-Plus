@@ -263,14 +263,29 @@ class Database:
             # IANA service name mapping (after protocol column)
             "ALTER TABLE logs ADD COLUMN IF NOT EXISTS service_name TEXT",
             "CREATE INDEX IF NOT EXISTS idx_logs_service_name ON logs (service_name) WHERE service_name IS NOT NULL",
-            # Normalize protocol to lowercase for index optimization
-            "UPDATE logs SET protocol = LOWER(protocol) WHERE protocol IS NOT NULL AND protocol != LOWER(protocol)",
             # System configuration table for dynamic settings
+            # Must be created before any migration block that may reference it.
             """CREATE TABLE IF NOT EXISTS system_config (
                 key TEXT PRIMARY KEY,
                 value JSONB NOT NULL,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )""",
+            # Normalize protocol to lowercase for index optimization
+            # Uses system_config marker to skip on subsequent boots (matches backfill pattern)
+            """DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM system_config
+    WHERE key = 'protocol_normalization_done'
+      AND value = 'true'::jsonb
+  ) THEN
+    UPDATE logs SET protocol = LOWER(protocol)
+    WHERE protocol IS NOT NULL AND protocol != LOWER(protocol);
+    INSERT INTO system_config (key, value, updated_at)
+    VALUES ('protocol_normalization_done', 'true', NOW())
+    ON CONFLICT (key) DO UPDATE SET value = 'true', updated_at = NOW();
+  END IF;
+END $$;""",
             # Legacy MCP tables — only create if not already migrated to api_tokens
             """DO $$ BEGIN
                 IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '_mcp_tokens_backup' AND table_schema = 'public')
