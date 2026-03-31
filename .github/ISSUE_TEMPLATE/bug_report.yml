@@ -97,13 +97,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Browser Extension** — fill in if your bug is related to the extension
+        ---
+        #### Browser Extension
 
   - type: input
     id: extension_version
     attributes:
-      label: Browser Extension Version
-      description: "Shown in your browser's extension management page (chrome://extensions or about:addons)"
+      label: Extension Version
+      description: "Fill in if your bug is related to the browser extension. Found in your browser's extension management page (chrome://extensions or about:addons)"
       placeholder: "e.g. 1.2.0"
     validations:
       required: false
