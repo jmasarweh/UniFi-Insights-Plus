@@ -97,7 +97,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### Browser Extension (fill in if your bug is related to the extension)
+        **Browser Extension** — fill in if your bug is related to the extension
 
   - type: input
     id: extension_version
