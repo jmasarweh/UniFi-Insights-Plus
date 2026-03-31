@@ -180,6 +180,19 @@ class TestParseFirewall:
         assert r['rule_action'] == 'block'
         assert r['direction'] == 'inbound'
 
+    def test_zone_index_rule_with_block_desc(self):
+        """Issue #80: GUEST_WAN-30004 with 'Block Unauthorized Traffic' description."""
+        body = (
+            'kernel: [GUEST_WAN-30004] DESCR="[GUEST_WAN]Block Unauthorized Traffic" '
+            'IN=br70 OUT=eth4 MAC=00:00:00:00:00:00:11:22:33:44:55:66:08:00 '
+            'SRC=10.120.70.96 DST=142.250.129.95 LEN=1278 TOS=00 PREC=0x00 TTL=63 '
+            'ID=16702 DF PROTO=UDP SPT=40682 DPT=443 LEN=1258 MARK=1a0000'
+        )
+        r = parse_firewall(body)
+        assert r['rule_name'] == 'GUEST_WAN-30004'
+        assert r['rule_desc'] == '[GUEST_WAN]Block Unauthorized Traffic'
+        assert r['rule_action'] == 'block'
+
     def test_missing_optional_fields(self):
         body = 'kernel: SRC=1.2.3.4 DST=10.0.0.1 PROTO=ICMP'
         r = parse_firewall(body)
@@ -381,6 +394,24 @@ class TestDeriveAction:
 
     def test_none_input(self):
         assert derive_action(None) is None
+
+    def test_new_format_returns_none(self):
+        """Zone-index format without description — returns None."""
+        assert derive_action('GUEST_WAN-30004') is None
+
+    def test_new_format_custom_zone(self):
+        assert derive_action('CUSTOM1_WAN-100') is None
+
+    def test_new_format_with_block_desc(self):
+        """Zone-index format with 'Block' in description — returns 'block'."""
+        assert derive_action('GUEST_WAN-30004', '[GUEST_WAN]Block Unauthorized Traffic') == 'block'
+
+    def test_new_format_with_allow_desc(self):
+        assert derive_action('LAN_WAN-100', 'Allow All Traffic') == 'allow'
+
+    def test_new_format_with_no_action_desc(self):
+        """Description without action keyword — returns None."""
+        assert derive_action('GUEST_WAN-30004', 'Some Custom Rule') is None
 
 
 # ── extract_mac ──────────────────────────────────────────────────────────────

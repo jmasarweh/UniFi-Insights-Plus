@@ -647,6 +647,33 @@ class Enricher:
             except Exception:
                 logger.debug("Device name resolution failed for src=%s dst=%s", src_ip, dst_ip, exc_info=True)
 
+        # Resolve rule_action from policy metadata for zone_index format rules.
+        # At parse time, derive_action() may have set rule_action from desc_hint
+        # (e.g. 'block' from "Block Unauthorized Traffic"). The policy metadata
+        # is authoritative and should override the desc_hint when available.
+        if (parsed.get('log_type') == 'firewall'
+                and self.unifi and self.unifi.enabled):
+            try:
+                from firewall_policy_matcher import parse_firewall_rule, resolve_rule_action
+                parsed_rule = parse_firewall_rule(
+                    parsed.get('rule_name'),
+                    rule_desc=parsed.get('rule_desc'),
+                )
+                if parsed_rule and parsed_rule['format'] == 'zone_index':
+                    from db import get_config, parse_vpn_config
+                    vpn_networks = parse_vpn_config(get_config(self._db, 'vpn_networks'))
+                    action = resolve_rule_action(
+                        parsed_rule, self.unifi,
+                        interface_in=parsed.get('interface_in', ''),
+                        interface_out=parsed.get('interface_out', ''),
+                        vpn_networks=vpn_networks,
+                    )
+                    if action:
+                        parsed['rule_action'] = action
+            except Exception:
+                logger.debug("Policy-based action resolution failed for %s",
+                             parsed.get('rule_name'), exc_info=True)
+
         if src_remote and not dst_remote:
             ip_to_enrich = src_ip
         elif dst_remote and not src_remote:

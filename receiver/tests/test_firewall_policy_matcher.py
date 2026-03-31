@@ -66,39 +66,210 @@ def _policy(policy_id, name, src_zone, dst_zone, action, index,
     }
 
 
-# ── parse_rule_name ──────────────────────────────────────────────────────────
+# ── parse_firewall_rule ──────────────────────────────────────────────────────
 
-class TestParseRuleName:
-    def test_standard_allow(self):
-        result = fpm.parse_rule_name('WAN_LOCAL-A-100')
-        assert result == {'chain': 'WAN_LOCAL', 'action_code': 'A', 'index': 100}
+class TestParseFirewallRule:
+    def test_legacy_allow(self):
+        result = fpm.parse_firewall_rule('WAN_LOCAL-A-100')
+        assert result['format'] == 'legacy'
+        assert result['chain'] == 'WAN_LOCAL'
+        assert result['action_code'] == 'A'
+        assert result['resolved_action'] == 'allow'
+        assert result['action_source'] == 'rule_name'
+        assert result['index'] == 100
 
-    def test_standard_drop(self):
-        result = fpm.parse_rule_name('LAN_WAN-D-2147483647')
-        assert result == {'chain': 'LAN_WAN', 'action_code': 'D', 'index': 2147483647}
+    def test_legacy_block_D(self):
+        result = fpm.parse_firewall_rule('LAN_WAN-D-2147483647')
+        assert result['format'] == 'legacy'
+        assert result['action_code'] == 'D'
+        assert result['resolved_action'] == 'block'
+        assert result['index'] == 2147483647
 
-    def test_reject(self):
-        result = fpm.parse_rule_name('WAN_LOCAL-R-50')
-        assert result == {'chain': 'WAN_LOCAL', 'action_code': 'R', 'index': 50}
+    def test_legacy_block_B(self):
+        result = fpm.parse_firewall_rule('WAN_IN-B-1')
+        assert result['format'] == 'legacy'
+        assert result['action_code'] == 'B'
+        assert result['resolved_action'] == 'block'
 
-    def test_custom_chain(self):
-        result = fpm.parse_rule_name('CUSTOM2_WAN-A-2147483647')
-        assert result == {'chain': 'CUSTOM2_WAN', 'action_code': 'A', 'index': 2147483647}
+    def test_legacy_reject(self):
+        result = fpm.parse_firewall_rule('WAN_LOCAL-R-50')
+        assert result['format'] == 'legacy'
+        assert result['action_code'] == 'R'
+        assert result['resolved_action'] == 'block'
+
+    def test_legacy_custom_chain(self):
+        result = fpm.parse_firewall_rule('CUSTOM2_WAN-A-2147483647')
+        assert result['format'] == 'legacy'
+        assert result['chain'] == 'CUSTOM2_WAN'
+        assert result['action_code'] == 'A'
+        assert result['index'] == 2147483647
+
+    def test_zone_index_no_desc(self):
+        result = fpm.parse_firewall_rule('GUEST_WAN-30004')
+        assert result['format'] == 'zone_index'
+        assert result['chain'] == 'GUEST_WAN'
+        assert result['index'] == 30004
+        assert result['action_code'] is None
+        assert result['resolved_action'] is None
+        assert result['action_source'] == 'default'
+
+    def test_zone_index_with_block_desc(self):
+        result = fpm.parse_firewall_rule('GUEST_WAN-30004',
+                                          rule_desc='[GUEST_WAN]Block Unauthorized Traffic')
+        assert result['format'] == 'zone_index'
+        assert result['resolved_action'] is None  # NOT pre-populated
+        assert result['action_source'] == 'default'
+        assert result['desc_hint'] == 'block'  # stored as hint for fallback
+
+    def test_zone_index_with_allow_desc(self):
+        result = fpm.parse_firewall_rule('LAN_WAN-100',
+                                          rule_desc='Allow All Traffic')
+        assert result['format'] == 'zone_index'
+        assert result['resolved_action'] is None
+        assert result['desc_hint'] == 'allow'
+
+    def test_zone_index_with_drop_desc(self):
+        result = fpm.parse_firewall_rule('LAN_WAN-200',
+                                          rule_desc='Drop Invalid State')
+        assert result['resolved_action'] is None
+        assert result['desc_hint'] == 'block'
+
+    def test_zone_index_with_reject_desc(self):
+        result = fpm.parse_firewall_rule('LAN_WAN-300',
+                                          rule_desc='Reject and Log')
+        assert result['resolved_action'] is None
+        assert result['desc_hint'] == 'block'
+
+    def test_zone_index_no_action_keyword_in_desc(self):
+        result = fpm.parse_firewall_rule('LAN_WAN-400',
+                                          rule_desc='Some Custom Rule')
+        assert result['resolved_action'] is None
+        assert result['action_source'] == 'default'
+        assert result['desc_hint'] is None
+
+    def test_zone_index_desc_case_insensitive(self):
+        result = fpm.parse_firewall_rule('GUEST_WAN-30004',
+                                          rule_desc='BLOCK all unauthorized')
+        assert result['desc_hint'] == 'block'
+
+    def test_zone_index_custom(self):
+        result = fpm.parse_firewall_rule('CUSTOM1_WAN-100')
+        assert result['format'] == 'zone_index'
+        assert result['chain'] == 'CUSTOM1_WAN'
+        assert result['index'] == 100
+
+    def test_redirect_dnat(self):
+        result = fpm.parse_firewall_rule('DNAT-1')
+        assert result['format'] == 'redirect'
+        assert result['resolved_action'] == 'redirect'
+        assert result['action_source'] == 'rule_name'
+
+    def test_redirect_prerouting(self):
+        result = fpm.parse_firewall_rule('PREROUTING-1')
+        assert result['format'] == 'redirect'
+        assert result['resolved_action'] == 'redirect'
 
     def test_none_input(self):
-        assert fpm.parse_rule_name(None) is None
+        assert fpm.parse_firewall_rule(None) is None
 
     def test_empty_string(self):
-        assert fpm.parse_rule_name('') is None
+        assert fpm.parse_firewall_rule('') is None
 
-    def test_invalid_format(self):
-        assert fpm.parse_rule_name('no-match-here') is None
+    def test_unrecognized(self):
+        assert fpm.parse_firewall_rule('CUSTOM_RULE') is None
 
     def test_unrecognized_action_code(self):
-        assert fpm.parse_rule_name('WAN_LOCAL-X-100') is None
+        """X is not a valid action code for legacy format."""
+        assert fpm.parse_firewall_rule('WAN_LOCAL-X-100') is None
 
     def test_missing_index(self):
-        assert fpm.parse_rule_name('WAN_LOCAL-A-') is None
+        assert fpm.parse_firewall_rule('WAN_LOCAL-A-') is None
+
+
+# ── resolve_rule_action ──────────────────────────────────────────────────────
+
+class TestResolveRuleAction:
+    def _setup(self, action='BLOCK', index=30004):
+        """Build a mock API with hotspot→external policy."""
+        zones = [
+            _zone('z-hot', 'Hotspot', ['net-guest']),
+            _zone('z-ext', 'External'),
+            _zone('z-gw', 'Gateway'),
+        ]
+        networks = [_network('net-guest', 'Guest', 50)]
+        net_config = {'wan_interfaces': [
+            {'name': 'WAN', 'physical_interface': 'eth3', 'active': True},
+        ]}
+        policies = [_policy('p1', 'Block Unauthorized', 'z-hot', 'z-ext', action, index)]
+        return _make_api(zones=zones, networks=networks, net_config=net_config, policies=policies)
+
+    def test_resolves_block(self):
+        api = self._setup(action='BLOCK', index=30004)
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004')
+        result = fpm.resolve_rule_action(parsed, api, 'br50', 'eth3')
+        assert result == 'block'
+        assert parsed['resolved_action'] == 'block'
+        assert parsed['action_source'] == 'policy_lookup'
+
+    def test_resolves_allow(self):
+        api = self._setup(action='ALLOW', index=30004)
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004')
+        result = fpm.resolve_rule_action(parsed, api, 'br50', 'eth3')
+        assert result == 'allow'
+
+    def test_unmatched_index_no_desc(self):
+        api = self._setup(action='BLOCK', index=999)
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004')
+        result = fpm.resolve_rule_action(parsed, api, 'br50', 'eth3')
+        assert result is None
+        assert parsed['resolved_action'] is None
+
+    def test_unmatched_index_falls_back_to_desc_hint(self):
+        """When policy lookup finds no match, desc_hint is used as fallback."""
+        api = self._setup(action='BLOCK', index=999)  # won't match 30004
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004',
+                                          rule_desc='Block Unauthorized Traffic')
+        assert parsed['desc_hint'] == 'block'
+        assert parsed['resolved_action'] is None  # not pre-populated
+        result = fpm.resolve_rule_action(parsed, api, 'br50', 'eth3')
+        assert result == 'block'
+        assert parsed['resolved_action'] == 'block'
+        assert parsed['action_source'] == 'rule_desc'
+
+    def test_policy_overrides_desc_hint(self):
+        """Policy metadata takes precedence over desc_hint."""
+        api = self._setup(action='ALLOW', index=30004)
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004',
+                                          rule_desc='Block Unauthorized Traffic')
+        assert parsed['desc_hint'] == 'block'  # desc says block
+        result = fpm.resolve_rule_action(parsed, api, 'br50', 'eth3')
+        assert result == 'allow'  # but policy says allow — policy wins
+        assert parsed['action_source'] == 'policy_lookup'
+
+    def test_no_api_falls_back_to_desc_hint(self):
+        """When no UniFi API is available, desc_hint is used."""
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004',
+                                          rule_desc='Block Unauthorized Traffic')
+        result = fpm.resolve_rule_action(parsed, None, 'br50', 'eth3')
+        assert result == 'block'
+        assert parsed['action_source'] == 'rule_desc'
+
+    def test_skips_already_resolved(self):
+        """If resolved_action is already set, return it without API calls."""
+        parsed = fpm.parse_firewall_rule('WAN_IN-A-1')
+        api = MagicMock()
+        result = fpm.resolve_rule_action(parsed, api, 'br0', 'eth3')
+        assert result == 'allow'
+        api.get_firewall_data.assert_not_called()
+
+    def test_none_parsed(self):
+        assert fpm.resolve_rule_action(None, MagicMock(), 'br0', 'eth3') is None
+
+    def test_unknown_interface(self):
+        api = self._setup()
+        parsed = fpm.parse_firewall_rule('GUEST_WAN-30004')
+        result = fpm.resolve_rule_action(parsed, api, 'br999', 'eth3')
+        assert result is None
 
 
 # ── build_zone_map ───────────────────────────────────────────────────────────
@@ -352,6 +523,64 @@ class TestMatchLogToPolicy:
         )
         assert result['policy']['origin'] == 'USER_DEFINED'
         assert 'metadata' not in result['policy']
+
+    def test_zone_index_matched_block(self):
+        """Zone-index format rule matches policy and returns action."""
+        # Add hotspot zone for GUEST_WAN matching
+        hotspot_zone = _zone('z-hot', 'Hotspot', ['net-guest'])
+        guest_net = _network('net-guest', 'Guest Network', 50)
+        policies = [_policy('p1', 'Block Unauthorized', 'z-hot', 'z-ext', 'BLOCK', 30004)]
+        api = self._setup_match(policies, extra_zones=[hotspot_zone])
+        net_config = api.get_network_config.return_value
+        api.get_network_config.return_value = {**net_config, 'networks': net_config['networks'] + [guest_net]}
+        result = fpm.match_log_to_policy(
+            api, interface_in='br50', interface_out='eth3',
+            rule_name='GUEST_WAN-30004',
+        )
+        assert result['status'] == 'matched'
+        assert result['policy']['id'] == 'p1'
+        assert result['policy']['action'] == 'block'
+
+    def test_zone_index_unmatched(self):
+        """Zone-index format with no matching policy."""
+        api = self._setup_match(policies=[])
+        result = fpm.match_log_to_policy(
+            api, interface_in='br0', interface_out='eth3',
+            rule_name='LAN_WAN-30004',
+        )
+        assert result['status'] == 'unmatched'
+
+    def test_legacy_block_B(self):
+        """Legacy -B- action code should match BLOCK policies."""
+        policies = [_policy('p1', 'Block Rule', 'z-int', 'z-ext', 'BLOCK', 1)]
+        api = self._setup_match(policies)
+        result = fpm.match_log_to_policy(
+            api, interface_in='br0', interface_out='eth3',
+            rule_name='LAN_WAN-B-1',
+        )
+        assert result['status'] == 'matched'
+        assert result['policy']['id'] == 'p1'
+
+    def test_redirect_unsupported(self):
+        """Redirect rules should return unsupported status."""
+        api = self._setup_match()
+        result = fpm.match_log_to_policy(
+            api, interface_in='br0', interface_out='eth3',
+            rule_name='DNAT-1',
+        )
+        assert result['status'] == 'unsupported'
+        assert 'Redirect' in result['message']
+
+    def test_action_in_matched_response(self):
+        """Matched response should include action field."""
+        policies = [_policy('p1', 'Allow All', 'z-int', 'z-ext', 'ALLOW', 50)]
+        api = self._setup_match(policies)
+        result = fpm.match_log_to_policy(
+            api, interface_in='br0', interface_out='eth3',
+            rule_name='LAN_WAN-A-50',
+        )
+        assert result['status'] == 'matched'
+        assert result['policy']['action'] == 'allow'
 
 
 # ── Snapshot cache ───────────────────────────────────────────────────────────

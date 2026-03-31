@@ -1649,6 +1649,21 @@ def get_wan_ips_from_config(db) -> list[str]:
     return db.get_config('wan_ips') or []
 
 
+def parse_vpn_config(raw) -> dict:
+    """Parse vpn_networks config value into a dict, handling all storage forms."""
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return {}
+
+
 def count_logs(db, log_type='firewall'):
     """Count logs by type."""
     with db.get_conn() as conn:
