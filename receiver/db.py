@@ -282,8 +282,8 @@ BEGIN
     UPDATE logs SET protocol = LOWER(protocol)
     WHERE protocol IS NOT NULL AND protocol != LOWER(protocol);
     INSERT INTO system_config (key, value, updated_at)
-    VALUES ('protocol_normalization_done', 'true', NOW())
-    ON CONFLICT (key) DO UPDATE SET value = 'true', updated_at = NOW();
+    VALUES ('protocol_normalization_done', 'true'::jsonb, NOW())
+    ON CONFLICT (key) DO UPDATE SET value = 'true'::jsonb, updated_at = NOW();
   END IF;
 END $$;""",
             # Legacy MCP tables — only create if not already migrated to api_tokens

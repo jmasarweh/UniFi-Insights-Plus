@@ -22,6 +22,10 @@ from unifi_api import UniFiPermissionError
 
 logger = logging.getLogger('api.unifi')
 
+_ERR_SSL = "SSL certificate verification failed. If using a self-signed certificate, enable 'Skip SSL verification' in UniFi settings."
+_ERR_CONNECTION = "Could not connect to the UniFi Controller. Check that the host is reachable and the URL is correct."
+_ERR_BULK = "Bulk update failed. One or more policies could not be processed. Check the container logs for details."
+
 router = APIRouter()
 
 
@@ -180,12 +184,10 @@ def unifi_network_config():
         return unifi_api.get_network_config()
     except SSLError:
         logger.exception("Failed to fetch UniFi network config")
-        raise HTTPException(status_code=502,
-            detail="SSL certificate verification failed. If using a self-signed certificate, enable 'Skip SSL verification' in UniFi settings.")
+        raise HTTPException(status_code=502, detail=_ERR_SSL)
     except RequestsConnectionError:
         logger.exception("Failed to fetch UniFi network config")
-        raise HTTPException(status_code=502,
-            detail="Could not connect to the UniFi Controller. Check that the host is reachable and the URL is correct.")
+        raise HTTPException(status_code=502, detail=_ERR_CONNECTION)
     except Exception as e:
         logger.exception("Failed to fetch UniFi network config")
         raise HTTPException(status_code=502,
@@ -255,12 +257,10 @@ def get_firewall_policies():
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except SSLError:
         logger.exception("Failed to fetch firewall policies")
-        raise HTTPException(status_code=502,
-            detail="SSL certificate verification failed. If using a self-signed certificate, enable 'Skip SSL verification' in UniFi settings.")
+        raise HTTPException(status_code=502, detail=_ERR_SSL)
     except RequestsConnectionError:
         logger.exception("Failed to fetch firewall policies")
-        raise HTTPException(status_code=502,
-            detail="Could not connect to the UniFi Controller. Check that the host is reachable and the URL is correct.")
+        raise HTTPException(status_code=502, detail=_ERR_CONNECTION)
     except Exception as e:
         logger.exception("Failed to fetch firewall policies")
         raise HTTPException(status_code=502,
@@ -328,8 +328,7 @@ def bulk_update_logging(body: dict):
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except Exception as e:
         logger.exception("Bulk firewall update failed")
-        raise HTTPException(status_code=502,
-            detail="Bulk update failed. One or more policies could not be processed. Check the container logs for details.") from e
+        raise HTTPException(status_code=502, detail=_ERR_BULK) from e
 
 
 @router.post("/api/firewall/policies/bulk-logging-stream")
@@ -361,7 +360,7 @@ def bulk_update_logging_stream(body: dict):
                 q.put({'event': 'error', 'detail': str(e)})
             except Exception as e:
                 logger.exception("Bulk firewall stream failed")
-                q.put({'event': 'error', 'detail': "Bulk update failed. One or more policies could not be processed. Check the container logs for details."})
+                q.put({'event': 'error', 'detail': _ERR_BULK})
             finally:
                 q.put(None)  # sentinel
 
