@@ -126,6 +126,7 @@ export default function App() {
   const [configLoaded, setConfigLoaded] = useState(false)
   const [showMigrationBanner, setShowMigrationBanner] = useState(false)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [dismissChecked, setDismissChecked] = useState(false)
   const [showVpnToast, setShowVpnToast] = useState(false)
   const [mapFlyTo, setMapFlyTo] = useState(null)
   const clearMapFlyTo = useCallback(() => setMapFlyTo(null), [])
@@ -322,10 +323,8 @@ export default function App() {
         // dismissible via checkbox.  Removal target: phase 2.
         if (cfg.setup_complete === true &&
             cfg.wizard_path === 'log_detection' &&
-            !cfg.upgrade_v2_dismissed &&
-            !sessionStorage.getItem('log_deprecation_shown')) {
+            !cfg.upgrade_v2_dismissed) {
           setShowUpgradeModal(true)
-          sessionStorage.setItem('log_deprecation_shown', '1')
         }
         setConfigLoaded(true)
       })
@@ -495,12 +494,15 @@ export default function App() {
   }, [])
 
   const maxFilterDays = useMemo(() => {
-    if (!health) return 365
+    if (!health) return null
+    const retention = health.retention_days || 60
     if (health.oldest_log_at) {
-      return Math.ceil((Date.now() - new Date(health.oldest_log_at).getTime()) / 86400e3)
+      const ts = new Date(health.oldest_log_at).getTime()
+      if (!isFinite(ts)) return null
+      const dataAge = Math.max(0, Math.ceil((Date.now() - ts) / 86400e3))
+      return Math.min(dataAge, retention)
     }
-    // No logs yet — fall back to retention period
-    return health.retention_days || 60
+    return 0 // no logs yet — sub-day ranges only
   }, [health])
 
   // Auth gates
@@ -582,23 +584,19 @@ export default function App() {
                   type="checkbox"
                   id="log-deprecation-dismiss"
                   className="rounded border-gray-600 bg-gray-800 text-teal-600 focus:ring-teal-500/30"
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      dismissUpgradeModal().catch(() => {})
-                    }
-                  }}
+                  onChange={(e) => setDismissChecked(e.target.checked)}
                 />
                 <span className="text-sm text-gray-500">Don't warn me again</span>
               </label>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { setShowUpgradeModal(false); setSettingsReconfig(true); setShowSettings(true) }}
+                  onClick={() => { if (dismissChecked) dismissUpgradeModal().catch(() => {}); setShowUpgradeModal(false); setDismissChecked(false); setSettingsReconfig(true); setShowSettings(true) }}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-teal-600 hover:bg-teal-500 text-white transition-colors"
                 >
                   Configure UniFi
                 </button>
                 <button
-                  onClick={() => setShowUpgradeModal(false)}
+                  onClick={() => { if (dismissChecked) dismissUpgradeModal().catch(() => {}); setShowUpgradeModal(false); setDismissChecked(false) }}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
                 >
                   OK

@@ -219,14 +219,17 @@ export function timeRangeToDays(value) {
 }
 
 // Filter time ranges to those within maxFilterDays (progressive unlock).
-// Always includes one "ceiling" range beyond the data span so users can
-// view their full dataset even when it falls between two range steps.
+// Includes one "ceiling" range beyond the data span so users can view
+// their full dataset even when it falls between two range steps.
+// null/undefined = show all (health not loaded yet).
+// 0 = no logs yet, sub-day ranges + 24h ceiling only.
 export function filterVisibleRanges(ranges, maxFilterDays, getValue = v => v) {
-  if (!maxFilterDays) return ranges
+  if (maxFilterDays == null) return ranges
   let ceilingIncluded = false
   return ranges.filter((tr) => {
     const days = timeRangeToDays(getValue(tr))
-    if (days < 1 || days <= maxFilterDays) return true
+    if (days < 1) return true
+    if (days <= maxFilterDays) return true
     if (!ceilingIncluded) { ceilingIncluded = true; return true }
     return false
   })

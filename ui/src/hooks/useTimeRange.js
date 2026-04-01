@@ -21,7 +21,7 @@ export default function useTimeRange(maxFilterDays) {
   // Depends on [maxFilterDays] only — including visibleRanges/timeRange would
   // create an infinite loop (effect sets timeRange → re-render → new array ref → repeat).
   useEffect(() => {
-    if (!maxFilterDays || visibleRanges.length === 0) return
+    if (maxFilterDays == null || visibleRanges.length === 0) return
     if (visibleRanges.includes(timeRange)) return
     const largest = visibleRanges.findLast(tr => timeRangeToDays(tr) >= 1) || visibleRanges[visibleRanges.length - 1]
     if (largest && largest !== timeRange) setTimeRange(largest)

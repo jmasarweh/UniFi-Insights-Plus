@@ -208,9 +208,14 @@ describe('timeRangeToDays', () => {
 describe('filterVisibleRanges', () => {
   const ranges = ['1h', '6h', '24h', '7d', '30d', '60d']
 
-  it('returns all when no maxFilterDays', () => {
+  it('returns all when maxFilterDays is null/undefined', () => {
     expect(filterVisibleRanges(ranges, null)).toEqual(ranges)
-    expect(filterVisibleRanges(ranges, 0)).toEqual(ranges)
+    expect(filterVisibleRanges(ranges, undefined)).toEqual(ranges)
+  })
+
+  it('returns sub-day ranges plus ceiling when maxFilterDays is 0', () => {
+    const result = filterVisibleRanges(ranges, 0)
+    expect(result).toEqual(['1h', '6h', '24h'])
   })
 
   it('includes ranges up to max plus one ceiling', () => {

@@ -171,7 +171,7 @@ export default function FilterBar({ filters, onChange, maxFilterDays, prefetched
   // Auto-correct selected range if it exceeds visible ranges (respects ceiling)
   // Skip when in custom date mode (time_range is null, time_from/time_to are set)
   useEffect(() => {
-    if (!maxFilterDays || visibleRanges.length === 0) return
+    if (maxFilterDays == null || visibleRanges.length === 0) return
     if (!filters.time_range && filters.time_from) return
     if (visibleRanges.some(tr => tr.value === filters.time_range)) return
     const largest = visibleRanges.findLast(tr => timeRangeToDays(tr.value) >= 1) || visibleRanges[visibleRanges.length - 1]
