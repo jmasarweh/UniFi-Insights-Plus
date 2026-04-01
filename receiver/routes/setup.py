@@ -279,6 +279,57 @@ def complete_setup(body: dict):
     return {"success": True}
 
 
+def _get_configured_interfaces(labels, wan_list, vpn_networks):
+    """Return interface names from persisted config only."""
+    return set(wan_list) | set(labels.keys()) | set(vpn_networks.keys())
+
+
+def _get_unifi_discovered_interfaces():
+    """Return interface names from UniFi API topology."""
+    ifaces = set()
+    try:
+        net_config = unifi_api.get_network_config()
+        for wan in net_config.get('wan_interfaces', []):
+            if wan.get('physical_interface'):
+                ifaces.add(wan['physical_interface'])
+        for net in net_config.get('networks', []):
+            if net.get('interface'):
+                ifaces.add(net['interface'])
+        for vpn in unifi_api.get_vpn_networks():
+            if vpn.get('interface'):
+                ifaces.add(vpn['interface'])
+    except Exception:
+        logger.warning("Could not fetch UniFi interfaces for /api/interfaces",
+                       exc_info=True)
+    return ifaces
+
+
+def _get_recent_log_interfaces():
+    """Return interface names from the last 36 hours of firewall logs.
+
+    Legacy supplement — retained for phase-1 transition only when
+    unifi_enabled is false.  Removal target: phase 2 log-detection
+    decommission.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT unnest(ARRAY[interface_in, interface_out]) as iface
+                FROM logs
+                WHERE log_type = 'firewall'
+                  AND timestamp > now() - interval '36 hours'
+                  AND (interface_in IS NOT NULL OR interface_out IS NOT NULL)
+            """)
+            return {row[0] for row in cur.fetchall() if row[0]}
+    except Exception as e:
+        logger.exception("Error querying interfaces")
+        raise HTTPException(status_code=500,
+                            detail="Failed to query interfaces") from e
+    finally:
+        put_conn(conn)
+
+
 @router.get("/api/interfaces")
 @ttl_cache(seconds=30)
 def list_interfaces():
@@ -297,27 +348,14 @@ def list_interfaces():
         logger.warning("Expected dict for vpn_networks config, got %s — using empty", type(vpn_networks).__name__)
         vpn_networks = {}
 
-    # Seed from config — always complete, even if logs were retention-cleaned
-    config_ifaces = set(wan_list) | set(labels.keys()) | set(vpn_networks.keys())
+    config_ifaces = _get_configured_interfaces(labels, wan_list, vpn_networks)
 
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT DISTINCT unnest(ARRAY[interface_in, interface_out]) as iface
-                FROM logs
-                WHERE log_type = 'firewall'
-                  AND timestamp > now() - interval '36 hours'
-                  AND (interface_in IS NOT NULL OR interface_out IS NOT NULL)
-            """)
-            log_ifaces = {row[0] for row in cur.fetchall() if row[0]}
-    except Exception as e:
-        logger.exception("Error querying interfaces")
-        raise HTTPException(status_code=500, detail="Failed to query interfaces") from e
-    finally:
-        put_conn(conn)
+    if unifi_api.enabled:
+        discovered = _get_unifi_discovered_interfaces()
+    else:
+        discovered = _get_recent_log_interfaces()
 
-    interfaces = config_ifaces | log_ifaces
+    interfaces = config_ifaces | discovered
 
     result = []
     for iface in sorted(interfaces):
