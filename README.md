@@ -1,7 +1,7 @@
 # UniFi Insights Plus (formerly Unifi Log Insight) [![GitHub Stars](https://img.shields.io/github/stars/jmasarweh/Unifi-Log-Insights)](https://github.com/jmasarweh/Unifi-Log-Insights/stargazers) 
 
 [![GitHub Release](https://img.shields.io/github/v/release/jmasarweh/Unifi-Log-Insights)](https://github.com/jmasarweh/Unifi-Log-Insights/releases/latest)
-[![Downloads](https://img.shields.io/badge/downloads-15k+-blue)](https://github.com/jmasarweh/Unifi-Log-Insights/pkgs/container/unifi-log-insight) [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/dlpkbnjhbhkijfkgnmnbohbokdfoimge?label=chrome-extension)](https://chromewebstore.google.com/detail/unifi-insights-plus/dlpkbnjhbhkijfkgnmnbohbokdfoimge)
+[![Downloads](https://img.shields.io/badge/downloads-16k+-blue)](https://github.com/jmasarweh/Unifi-Log-Insights/pkgs/container/unifi-log-insight) [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/dlpkbnjhbhkijfkgnmnbohbokdfoimge?label=chrome-extension)](https://chromewebstore.google.com/detail/unifi-insights-plus/dlpkbnjhbhkijfkgnmnbohbokdfoimge)
 [![Firefox Add-ons](https://img.shields.io/amo/v/unifi-insights-plus?label=firefox-addon)](https://addons.mozilla.org/en-US/firefox/addon/unifi-insights-plus/) [![Tests](https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/test.yml?branch=main&label=tests)](https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/test.yml)
 [![Docker Build](https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/docker-publish.yml?label=docker%20build)](https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/docker-publish.yml)
 
@@ -55,51 +55,17 @@ Single Docker container. No external dependencies. Zero data collection.
 - **UniFi Router** (or any UniFi gateway that supports remote syslog)
 - **Zone-based firewall** (not legacy/classic). The Firewall Syslog Manager and firewall policy API require the zone-based policy engine. If you are still on the legacy/classic firewall, migrate via **Settings > Policy Engine** in your UniFi controller before setting up ULI.
 - **MaxMind GeoLite2 account** ([free signup](https://www.maxmind.com/en/geolite2/signup)) - for GeoIP/ASN lookups
-- **AbuseIPDB API key** ([free tier](https://www.abuseipdb.com/register?plan=free), optional) - for threat scoring
+- **AbuseIPDB API key** ([free tier](https://www.abuseipdb.com/register?plan=free), recommended but optional) - for threat scoring
 
 **Minimum host resources (estimated):**
 
-- **CPU:** 2 cores/threads minimum (PostgreSQL + receiver + API run concurrently)
+- **CPU:** 4 cores/threads minimum (PostgreSQL + receiver + API run concurrently)
+- **Memory/RAM:** minimum of 4 GB of RAM
 - **Disk:** 10 GB free for the database volume (`pgdata`) at minimum
 
-These are baseline estimates for a small home network. Higher log volume or longer retention will require more disk.
+These are baseline estimates for a small home network. Higher log volume or longer retention will require more CPU cores, RAM and Disk space.
 > **Docker log rotation** is enabled by default in `docker-compose.yml` (10 MB max, 5 files). If you use a custom compose file, add a [`logging:` section](https://docs.docker.com/compose/compose-file/compose-file-v3/#logging) to prevent unbounded container log growth.
 
-### Authentication (Optional)
-
-ULI supports optional built-in authentication with session cookies and API tokens. When enabled, authentication requires **HTTPS** — the login and setup endpoints will reject requests over plain HTTP to protect credentials in transit.
-
-**Quick start:**
-
-1. Configure HTTPS on your reverse proxy first (authentication requires HTTPS).
-2. Set `AUTH_ENABLED=true` in your `.env` or `docker-compose.yml` environment block and restart the container.
-3. Open the ULI web UI over HTTPS — the Settings → Security page will show a "Create admin account" form.
-4. Create the first admin user (username + password, min 8 characters). This enables authentication immediately.
-5. Subsequent visits will require login. API tokens for MCP or external integrations can be created in Settings → MCP.
-
-> For the full authentication reference (session management, token rotation, reverse proxy security, and audit logging), see [insightsplus.dev/docs/authentication](https://insightsplus.dev/docs/authentication).
-
-**Production:** Place ULI behind a reverse proxy (nginx, Caddy, Traefik) that terminates TLS and sets `X-Forwarded-Proto: https`. ULI reads this header to determine the effective protocol. **Your reverse proxy must overwrite (not forward) any client-supplied `X-Forwarded-Proto` header** — otherwise an attacker can inject the header to bypass the HTTPS requirement. Examples:
-
-```nginx
-# nginx
-proxy_set_header X-Forwarded-Proto $scheme;
-```
-```caddyfile
-# Caddy (automatic — Caddy sets X-Forwarded-Proto by default)
-reverse_proxy localhost:8090
-```
-```yaml
-# Traefik (headers middleware — assumes Traefik terminates TLS)
-labels:
-  - "traefik.http.middlewares.uli-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
-```
-
-**Local development:** The Vite dev server proxies API requests to `http://localhost:8000` without TLS. To develop with auth enabled, either:
-- Use a local reverse proxy (e.g. `mkcert` + nginx) in front of the API, or
-- Leave `AUTH_ENABLED=false` (the default) to bypass auth during development.
-
-> **Docker log rotation** is enabled by default in `docker-compose.yml` (10 MB max, 5 files). If you use a custom compose file, add a [`logging:` section](https://docs.docker.com/compose/compose-file/compose-file-v3/#logging) to prevent unbounded container log growth.
 
 ## 📸 App Screenshots
 
