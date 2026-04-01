@@ -148,7 +148,7 @@
       'header[class*="unifi-portal"] div[class*="unifi-portal"]'
     );
     for (const el of candidates) {
-      if (el.querySelectorAll(':scope > a').length >= 2) return el;
+      if (el.querySelectorAll(':scope > a').length >= 1) return el;
     }
     return null;
   }
