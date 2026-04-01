@@ -1575,6 +1575,10 @@ END $$;""",
         get_wan_ips_by_interface() and stores wan_ip_by_iface automatically.
 
         Returns the primary detected WAN IP or None.
+
+        .. deprecated:: Phase 1 transition
+            Retained for phase-1 transition only (non-UniFi installs).
+            Removal target: phase 2 log-detection decommission.
         """
         wan_interfaces = self.get_config('wan_interfaces', ['ppp0'])
         if not wan_interfaces:
@@ -1614,6 +1618,10 @@ END $$;""",
     def detect_gateway_ips(self) -> list[str]:
         """Detect gateway internal IPs from _LOCAL firewall rule names.
 
+        .. deprecated:: Phase 1 transition
+            Retained for phase-1 transition only (non-UniFi installs).
+            Removal target: phase 2 log-detection decommission.
+
         UniFi zone-based rules ending in '_LOCAL' target traffic destined for
         the gateway itself. The dst_ip on those rules (excluding broadcast/
         multicast) gives us the gateway's internal IP per VLAN.
@@ -1644,6 +1652,10 @@ END $$;""",
         """Return non-bridge, non-VPN firewall interfaces with their WAN IPs.
 
         Used by the setup wizard to discover candidate WAN interfaces.
+
+        .. deprecated:: Phase 1 transition
+            Retained for phase-1 transition only (log-detection wizard).
+            Removal target: phase 2 log-detection decommission.
         """
         from parsers import VPN_INTERFACE_PREFIXES
         vpn_excludes = " ".join(

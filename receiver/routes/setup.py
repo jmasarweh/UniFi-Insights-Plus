@@ -83,7 +83,11 @@ def setup_status():
 
 @router.get("/api/setup/wan-candidates")
 def wan_candidates():
-    """Return non-bridge firewall interfaces with their associated WAN IP."""
+    """Return non-bridge firewall interfaces with their associated WAN IP.
+
+    Phase-1 transition: retained for log-detection wizard path only.
+    Removal target: phase 2 log-detection decommission.
+    """
     return {
         'candidates': enricher_db.get_wan_ip_candidates(),
     }
@@ -256,6 +260,7 @@ def complete_setup(body: dict):
                            "poll will refresh", exc_info=True)
     elif wizard_path == "log_detection":
         # Log-detection path: compute wan_ip_by_iface from logs
+        # Phase-1 transition: removal target phase 2 log-detection decommission
         iface_ips = enricher_db.get_wan_ips_by_interface(body["wan_interfaces"])
         if iface_ips:
             set_config(enricher_db, "wan_ip_by_iface", iface_ips)
