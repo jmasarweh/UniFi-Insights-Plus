@@ -34,19 +34,27 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
   }
   const enrichableIP = getEnrichableIP()
 
-  const canEnrich = log
+  // Manual enrich button: show for block AND unknown-action firewall logs
+  const canShowEnrichButton = log
+    && log.log_type === 'firewall'
+    && (log.rule_action === 'block' || !log.rule_action)
+    && !log.abuse_usage_type
+    && enrichableIP
+
+  // Budget prefetch: only for confirmed block (auto-enrich eligible)
+  const canPrefetchBudget = log
     && log.log_type === 'firewall'
     && log.rule_action === 'block'
     && !log.abuse_usage_type
     && enrichableIP
 
-  // Fetch budget status when enrich button would be shown
+  // Fetch budget status when auto-enrich eligible
   useEffect(() => {
-    if (!canEnrich) return
+    if (!canPrefetchBudget) return
     fetchAbuseIPDBStatus()
       .then(s => setBudget(s.remaining))
       .catch(() => setBudget(null))
-  }, [canEnrich])
+  }, [canPrefetchBudget])
 
   // Match firewall log to policy for syslog toggle
   const canMatchPolicy = log?.log_type === 'firewall' && log?.rule_name && parseRuleName(log.rule_name)
@@ -236,13 +244,16 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
     if (!hiddenColumns.has('rule')) {
       const parsed = parseRuleName(displayLog.rule_name)
       if (parsed) {
+        const actionDisplay = parsed.action
+          || (displayLog.rule_action && displayLog.rule_action.charAt(0).toUpperCase() + displayLog.rule_action.slice(1))
+          || 'Unknown'
         sections.push(
           <div key="rule_parsed">
             <span className="text-gray-400 text-[12px] uppercase tracking-wider">Rule Details</span>
             <div className="text-gray-300 text-sm mt-0.5">
               <span className="text-gray-300">Chain:</span> {parsed.chain}
               <span className="text-gray-500 mx-2">·</span>
-              <span className="text-gray-300">Action:</span> {parsed.action}
+              <span className="text-gray-300">Action:</span> {actionDisplay}
               <span className="text-gray-500 mx-2">·</span>
               <span className="text-gray-300">Priority:</span> {parsed.priority}
             </div>
@@ -456,8 +467,8 @@ export default function LogDetail({ log, hiddenColumns = new Set() }) {
     )
   }
 
-  // Enrich button — shown when abuse data is missing for a blocked firewall log
-  const showEnrichButton = showAbuse && canEnrich && !enrichedData
+  // Enrich button — shown when abuse data is missing for blocked or unknown-action firewall logs
+  const showEnrichButton = showAbuse && canShowEnrichButton && !enrichedData
 
   return (
     <div className="bg-gray-950/80 px-4 py-3 max-h-[60vh] sm:max-h-none overflow-y-auto">

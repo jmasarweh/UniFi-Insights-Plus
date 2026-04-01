@@ -165,6 +165,28 @@ class TestBuildLogQuery:
         assert 'NOT IN' in where
         assert 'block' in params
 
+    def test_unknown_action_filter(self):
+        where, params = self._build(rule_action='unknown')
+        assert 'rule_action IS NULL' in where
+        assert 'unknown' not in params
+
+    def test_unknown_with_block_action_filter(self):
+        where, params = self._build(rule_action='block,unknown')
+        assert 'rule_action IN' in where
+        assert 'rule_action IS NULL' in where
+        assert 'OR' in where
+        assert 'block' in params
+
+    def test_negated_unknown_action_filter(self):
+        where, params = self._build(rule_action='!unknown')
+        assert 'rule_action IS NOT NULL' in where
+
+    def test_negated_unknown_with_block(self):
+        where, params = self._build(rule_action='!block,unknown')
+        assert 'NOT IN' in where
+        assert 'IS NOT NULL' in where
+        assert 'block' in params
+
     def test_negated_country(self):
         where, params = self._build(country='!US,CN')
         assert 'NOT IN' in where

@@ -25,6 +25,7 @@ QUEUE_WORKER_INTERVAL = 300       # 5 minutes
 QUEUE_BATCH_SIZE = 50             # IPs per queue pass
 STALE_REENRICH_BATCH = 10         # Stale IPs per pass
 SERVICE_NAME_BATCH_SIZE = 1000    # Rows per service-name cursor batch
+RULE_ACTION_BATCH_SIZE = 500      # Rows per rule-action cursor batch
 
 
 class BackfillTask:
@@ -68,6 +69,7 @@ class BackfillTask:
 
         # One-shot migrations (ID cursor, persisted progress)
         self._service_name_migration()
+        self._backfill_rule_action()
         self._orphan_queue_seed()
 
         # Queue worker: process deferred threat lookups
@@ -250,6 +252,85 @@ class BackfillTask:
         if total_patched > 0 or len(rows) > 0:
             logger.debug("Service-name migration: %d patched in batch (cursor at id=%d)",
                          total_patched, last_id)
+
+    # ── One-shot rule_action backfill for zone_index format rules ────────────
+
+    def _backfill_rule_action(self):
+        """One-shot ID-cursor repair for zone_index format rules stored with wrong rule_action.
+
+        New-format rule names (ZONE_ZONE-INDEX) lack an embedded action code,
+        so derive_action() previously defaulted them to 'allow'. This backfill
+        resolves the correct action via policy metadata or description fallback.
+
+        Performance note: the regex filter in the query is applied by Postgres
+        during the index scan — non-matching rows are not sent to Python but
+        ARE examined by the database. Runtime depends on match sparsity and
+        distribution across the id range, not just match count. On large tables
+        (20M+ rows) with sparse matches, individual batches may scan large id
+        ranges. This is a one-time migration cost; consider running off-peak.
+        """
+        from db import get_config, set_config
+        from firewall_policy_matcher import parse_firewall_rule, resolve_rule_action
+
+        if get_config(self.db, 'rule_action_backfill_done', False):
+            return
+
+        last_id = get_config(self.db, 'rule_action_backfill_last_id', 0) or 0
+
+        # UniFi API is optional — desc_hint fallback works without it
+        has_unifi = self.enricher.unifi and self.enricher.unifi.enabled
+        vpn_networks = {}
+        if has_unifi:
+            from db import parse_vpn_config
+            vpn_networks = parse_vpn_config(get_config(self.db, 'vpn_networks'))
+
+        with self.db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, rule_name, rule_desc, rule_action, interface_in, interface_out "
+                    "FROM logs "
+                    "WHERE id > %s "
+                    "  AND log_type = 'firewall' "
+                    "  AND rule_name ~ '^[A-Z][A-Z0-9]*_[A-Z][A-Z0-9]*-[0-9]+$' "
+                    "ORDER BY id LIMIT %s",
+                    [last_id, RULE_ACTION_BATCH_SIZE]
+                )
+                rows = cur.fetchall()
+
+        if not rows:
+            set_config(self.db, 'rule_action_backfill_done', True)
+            logger.info("Rule-action backfill complete (cursor at id=%d)", last_id)
+            return
+
+        updates = []
+        for row_id, rule_name, rule_desc, stored_action, iface_in, iface_out in rows:
+            last_id = row_id
+            parsed_rule = parse_firewall_rule(rule_name, rule_desc=rule_desc)
+            if not parsed_rule or parsed_rule['format'] != 'zone_index':
+                continue
+            # resolve_rule_action handles both policy lookup (preferred) and desc_hint fallback
+            action = resolve_rule_action(
+                parsed_rule, self.enricher.unifi if has_unifi else None,
+                interface_in=iface_in or '',
+                interface_out=iface_out or '',
+                vpn_networks=vpn_networks,
+            )
+            if action and action != stored_action:
+                updates.append((row_id, action))
+
+        if updates:
+            with self.db.get_conn() as conn:
+                with conn.cursor() as cur:
+                    extras.execute_batch(
+                        cur,
+                        "UPDATE logs SET rule_action = %s WHERE id = %s",
+                        [(action, row_id) for row_id, action in updates]
+                    )
+                    conn.commit()
+            logger.debug("Rule-action backfill: %d rows patched in batch (cursor at id=%d)",
+                         len(updates), last_id)
+
+        set_config(self.db, 'rule_action_backfill_last_id', last_id)
 
     def _orphan_queue_seed(self):
         """One-time seed: scan historical logs for orphan IPs missing from ip_threats.

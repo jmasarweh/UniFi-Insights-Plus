@@ -104,6 +104,7 @@ export const ACTION_STYLES = {
   block: 'bg-red-500/20 text-red-400 border-red-500/40',
   allow: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
   redirect: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  unknown: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
   DHCPACK: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
   DHCPDISCOVER: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
   DHCPREQUEST: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',

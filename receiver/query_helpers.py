@@ -191,12 +191,26 @@ def build_log_query(
     if rule_action:
         negated, val = _parse_negation(rule_action)
         actions = [a.strip() for a in val.split(',')]
-        placeholders = ','.join(['%s'] * len(actions))
+        has_unknown = 'unknown' in actions
+        known_actions = [a for a in actions if a != 'unknown']
         if negated:
-            conditions.append(f"(rule_action NOT IN ({placeholders}) OR rule_action IS NULL)")
+            placeholders = ','.join(['%s'] * len(known_actions))
+            if has_unknown and known_actions:
+                conditions.append(f"(rule_action NOT IN ({placeholders}) AND rule_action IS NOT NULL)")
+            elif has_unknown:
+                conditions.append("rule_action IS NOT NULL")
+            else:
+                conditions.append(f"(rule_action NOT IN ({placeholders}) OR rule_action IS NULL)")
+            params.extend(known_actions)
         else:
-            conditions.append(f"rule_action IN ({placeholders})")
-        params.extend(actions)
+            parts = []
+            if known_actions:
+                placeholders = ','.join(['%s'] * len(known_actions))
+                parts.append(f"rule_action IN ({placeholders})")
+                params.extend(known_actions)
+            if has_unknown:
+                parts.append("rule_action IS NULL")
+            conditions.append(f"({' OR '.join(parts)})")
 
     if rule_name:
         negated, val = _parse_negation(rule_name)

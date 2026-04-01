@@ -29,23 +29,86 @@ _ZONE_CHAIN_MAP = {
 
 # ── Rule name parsing ────────────────────────────────────────────────────────
 
-_RULE_NAME_RE = re.compile(r'^(.+?)-(A|D|R)-(\d+)$')
+_LEGACY_RE = re.compile(r'^(.+?)-(A|B|D|R)-(\d+)(?:-[A-Z])?$')
+_ZONE_INDEX_RE = re.compile(r'^([A-Z][A-Z0-9]*_[A-Z][A-Z0-9]*)-(\d+)$')
+_DESC_ACTION_RE = re.compile(r'\b(block|drop|reject|allow)\b', re.IGNORECASE)
 
-_ACTION_CODE_TO_POLICY = {'A': 'ALLOW', 'D': 'BLOCK'}
+_ACTION_CODE_MAP = {'A': 'allow', 'B': 'block', 'D': 'block', 'R': 'block'}
+_ACTION_CODE_TO_POLICY = {'A': 'ALLOW', 'B': 'BLOCK', 'D': 'BLOCK'}
+_DESC_ACTION_MAP = {'block': 'block', 'drop': 'block', 'reject': 'block', 'allow': 'allow'}
 
 
-def parse_rule_name(rule_name):
-    """Parse a syslog rule_name into (chain, action_code, index) or None."""
+def _action_from_desc(rule_desc):
+    """Extract action from rule description text (e.g. 'Block Unauthorized Traffic').
+
+    Used as a last-resort fallback for zone_index rules where the rule name
+    has no embedded action code. The description is user-editable, so the
+    policy metadata lookup via resolve_rule_action() is preferred when available.
+    """
+    if not rule_desc:
+        return None
+    m = _DESC_ACTION_RE.search(rule_desc)
+    if m:
+        return _DESC_ACTION_MAP[m.group(1).lower()]
+    return None
+
+
+def parse_firewall_rule(rule_name, rule_desc=None):
+    """Parse a firewall rule reference into structured metadata.
+
+    Understands two formats:
+    - Legacy:     CHAIN-A-123  (action code embedded)
+    - Zone-index: ZONE_ZONE-123 (action from description fallback or policy lookup)
+
+    For zone_index rules, if rule_desc is provided, the action keyword
+    ('Block', 'Allow', etc.) is extracted as a best-effort fallback.
+    The authoritative source remains the UniFi API policy metadata
+    via resolve_rule_action().
+
+    Returns dict with format, chain, index, action_code, resolved_action,
+    action_source. Returns None if rule_name doesn't match either format.
+    """
     if not rule_name:
         return None
-    m = _RULE_NAME_RE.match(rule_name)
-    if not m:
-        return None
-    return {
-        'chain': m.group(1),
-        'action_code': m.group(2),
-        'index': int(m.group(3)),
-    }
+
+    # Check for DNAT/PREROUTING first
+    if 'DNAT' in rule_name or 'PREROUTING' in rule_name:
+        return {
+            'format': 'redirect',
+            'chain': rule_name,
+            'index': None,
+            'action_code': None,
+            'resolved_action': 'redirect',
+            'action_source': 'rule_name',
+        }
+
+    # Legacy format: CHAIN-A-123
+    m = _LEGACY_RE.match(rule_name)
+    if m:
+        code = m.group(2)
+        return {
+            'format': 'legacy',
+            'chain': m.group(1),
+            'index': int(m.group(3)),
+            'action_code': code,
+            'resolved_action': _ACTION_CODE_MAP.get(code, 'allow'),
+            'action_source': 'rule_name',
+        }
+
+    # Zone-index format: ZONE_ZONE-123
+    m = _ZONE_INDEX_RE.match(rule_name)
+    if m:
+        return {
+            'format': 'zone_index',
+            'chain': m.group(1),
+            'index': int(m.group(2)),
+            'action_code': None,
+            'resolved_action': None,
+            'action_source': 'default',
+            'desc_hint': _action_from_desc(rule_desc),
+        }
+
+    return None
 
 
 # ── Snapshot cache ───────────────────────────────────────────────────────────
@@ -115,6 +178,75 @@ def _get_snapshot(unifi_api, vpn_networks=None):
     logger.debug("Firewall snapshot cache refreshed (%d policies, %d zones)",
                  len(snapshot['policies']), len(snapshot['zones']))
     return snapshot
+
+
+# ── Zone resolution helper ────────────────────────────────────────────────────
+
+def _resolve_zone_pair(zone_data, interface_in, interface_out):
+    """Map interface pair to (src_zone_id, dst_zone_id).
+
+    Empty interface_out maps to the gateway zone.
+    Returns (None, None) if zone_data is missing or interfaces unknown.
+    """
+    iface_to_zone = {}
+    gateway_zone_id = None
+    for z in zone_data.get('zone_map', []):
+        if z['zone_name'].lower() == 'gateway':
+            gateway_zone_id = z['zone_id']
+        for iface in z['interfaces']:
+            iface_to_zone[iface['interface']] = z['zone_id']
+
+    src_zone_id = iface_to_zone.get(interface_in)
+    dst_zone_id = gateway_zone_id if not interface_out else iface_to_zone.get(interface_out)
+    return src_zone_id, dst_zone_id
+
+
+# ── Action resolution ─────────────────────────────────────────────────────────
+
+def resolve_rule_action(parsed_rule, unifi_api, interface_in, interface_out,
+                        vpn_networks=None):
+    """Resolve rule_action from policy metadata for zone_index format rules.
+
+    Resolution order:
+    1. Policy metadata lookup (authoritative — from UniFi controller)
+    2. Description hint (best-effort fallback — from rule_desc keyword)
+
+    Mutates parsed_rule in place: sets resolved_action and action_source.
+    Uses the cached snapshot to avoid repeated API calls.
+
+    Returns the resolved action string ('allow'/'block') or None if unresolvable.
+    """
+    if not parsed_rule or parsed_rule.get('resolved_action') is not None:
+        return parsed_rule.get('resolved_action') if parsed_rule else None
+
+    # Try authoritative policy metadata lookup first
+    if unifi_api:
+        try:
+            snapshot = _get_snapshot(unifi_api, vpn_networks=vpn_networks)
+            zone_data = snapshot['zone_data']
+            src_zone_id, dst_zone_id = _resolve_zone_pair(zone_data, interface_in, interface_out)
+            if src_zone_id and dst_zone_id:
+                rule_index = parsed_rule['index']
+                for p in snapshot['policies']:
+                    if (p.get('source', {}).get('zoneId') == src_zone_id
+                            and p.get('destination', {}).get('zoneId') == dst_zone_id
+                            and p.get('index') == rule_index):
+                        action = p.get('action', {}).get('type', '').lower()
+                        if action in ('allow', 'block'):
+                            parsed_rule['resolved_action'] = action
+                            parsed_rule['action_source'] = 'policy_lookup'
+                            return action
+        except Exception:
+            logger.debug("Snapshot fetch failed for rule action resolution", exc_info=True)
+
+    # Fall back to description hint (user-editable, best-effort)
+    desc_hint = parsed_rule.get('desc_hint')
+    if desc_hint:
+        parsed_rule['resolved_action'] = desc_hint
+        parsed_rule['action_source'] = 'rule_desc'
+        return desc_hint
+
+    return None
 
 
 # ── Zone map builder ─────────────────────────────────────────────────────────
@@ -239,34 +371,35 @@ def match_log_to_policy(unifi_api, interface_in, interface_out, rule_name,
     """Match a firewall log entry to a single firewall policy.
 
     Uses the cached snapshot to avoid repeated UniFi API calls.
-    The action is derived from rule_name parsing (A/D/R), not from the
-    log's rule_action field, so rule_action is not needed here.
+    Supports both legacy (CHAIN-A-123) and zone-index (ZONE_ZONE-123) formats.
 
     Args:
         unifi_api: UniFiAPI instance.
         interface_in: Source interface from the log (e.g. 'br50', 'eth3').
         interface_out: Destination interface from the log (e.g. 'eth3', '' for Gateway).
-        rule_name: Syslog rule_name (e.g. 'CUSTOM2_WAN-A-2147483647').
+        rule_name: Syslog rule_name (e.g. 'CUSTOM2_WAN-A-2147483647', 'GUEST_WAN-30004').
         vpn_networks: dict from system_config.
 
     Returns:
         dict with 'status' and optional 'policy'/'message' keys.
         Statuses: matched, unmatched, ambiguous, uncontrollable, unsupported, error.
     """
-    # Parse rule_name
-    parsed = parse_rule_name(rule_name)
+    parsed = parse_firewall_rule(rule_name)
     if not parsed:
         return {"status": "unsupported", "message": "Could not parse rule name."}
 
-    action_code = parsed['action_code']
+    fmt = parsed['format']
     rule_index = parsed['index']
 
-    # R (reject) is unsupported until verified against live payloads
-    if action_code == 'R':
+    # Redirect rules have no matchable policy
+    if fmt == 'redirect':
+        return {"status": "unsupported",
+                "message": "Redirect rules are not supported for log matching."}
+
+    # Legacy: R (reject) is unsupported until verified against live payloads
+    if fmt == 'legacy' and parsed['action_code'] == 'R':
         return {"status": "unsupported",
                 "message": "Reject rules are not yet supported for log matching."}
-
-    expected_action = _ACTION_CODE_TO_POLICY.get(action_code)
 
     # Get cached snapshot (zone map + policies)
     try:
@@ -277,42 +410,36 @@ def match_log_to_policy(unifi_api, interface_in, interface_out, rule_name,
 
     zone_data = snapshot['zone_data']
 
-    # Build interface -> zone_id and zone_id -> zone_name lookups
-    iface_to_zone = {}
+    # Resolve zone pair via shared helper
+    src_zone_id, dst_zone_id = _resolve_zone_pair(zone_data, interface_in, interface_out)
+
+    # Build zone_id -> zone_name lookup (only needed here for the response)
     zone_id_to_name = {}
-    gateway_zone_id = None
     for z in zone_data.get('zone_map', []):
         zone_id_to_name[z['zone_id']] = z['zone_name']
-        if z['zone_name'].lower() == 'gateway':
-            gateway_zone_id = z['zone_id']
-        for iface in z['interfaces']:
-            iface_to_zone[iface['interface']] = z['zone_id']
 
-    # Resolve source zone from interface_in
-    src_zone_id = iface_to_zone.get(interface_in)
     if not src_zone_id:
         return {"status": "unmatched",
                 "message": f"Unknown source interface: {interface_in}"}
-
-    # Resolve dest zone from interface_out (falsy = Gateway)
-    if not interface_out:
-        dst_zone_id = gateway_zone_id
-    else:
-        dst_zone_id = iface_to_zone.get(interface_out)
     if not dst_zone_id:
         return {"status": "unmatched",
                 "message": f"Unknown destination interface: {interface_out or '(empty)'}"}
 
     policies = snapshot['policies']
 
-    # Match across ALL policies first (zone pair + action + index)
+    # For legacy format, filter by expected action; for zone_index, match by zone pair + index only
+    if fmt == 'legacy':
+        expected_action = _ACTION_CODE_TO_POLICY.get(parsed['action_code'])
+    else:
+        expected_action = None  # zone_index: action comes from matched policy
+
     all_matches = []
     for p in policies:
         if p.get('source', {}).get('zoneId') != src_zone_id:
             continue
         if p.get('destination', {}).get('zoneId') != dst_zone_id:
             continue
-        if p.get('action', {}).get('type') != expected_action:
+        if expected_action and p.get('action', {}).get('type') != expected_action:
             continue
         if p.get('index') != rule_index:
             continue
@@ -350,6 +477,7 @@ def match_log_to_policy(unifi_api, interface_in, interface_out, rule_name,
 
     policy = controllable[0]
     origin = policy.get('metadata', {}).get('origin', '')
+    policy_action = policy.get('action', {}).get('type', '').lower() or None
 
     return {
         "status": "matched",
@@ -358,6 +486,7 @@ def match_log_to_policy(unifi_api, interface_in, interface_out, rule_name,
             "name": policy.get('name', ''),
             "loggingEnabled": policy.get('loggingEnabled', False),
             "origin": origin,
+            "action": policy_action,
             "srcZone": zone_id_to_name.get(src_zone_id, ''),
             "dstZone": zone_id_to_name.get(dst_zone_id, ''),
         }

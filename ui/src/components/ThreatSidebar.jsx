@@ -68,7 +68,7 @@ function LogEntry({ log, onSelect }) {
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
         <span className={`text-xs uppercase font-semibold ${ACTION_STYLES[log.rule_action] || 'text-gray-500'}`}>
-          {log.rule_action || log.log_type}
+          {log.rule_action || (log.log_type === 'firewall' ? 'unknown' : log.log_type)}
         </span>
         <span className="text-gray-500 text-xs">{dateStr} {timeStr}</span>
       </div>
@@ -97,7 +97,9 @@ function LogDetailPanel({ log }) {
         <div className="px-3 pb-2">
           <Row label="Risk" value={<ThreatBadge score={log.threat_score} />} />
           <Row label="Action" value={
-            <span className={ACTION_STYLES[log.rule_action] || ''}>{log.rule_action || '—'}</span>
+            <span className={ACTION_STYLES[log.rule_action] || 'text-gray-500'}>
+              {log.rule_action || (log.log_type === 'firewall' ? 'unknown' : '—')}
+            </span>
           } />
           {log.service_name && <Row label="Service" value={formatServiceName(log.service_name)} />}
           {log.rule_desc && <Row label="Policy" value={normalizeRuleDesc(log.rule_desc)} />}

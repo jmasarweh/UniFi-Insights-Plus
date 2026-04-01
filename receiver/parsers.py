@@ -271,22 +271,23 @@ def derive_direction(iface_in: str, iface_out: str, rule_name: str, src_ip: str 
     return 'local'
 
 
-def derive_action(rule_name: str) -> str:
-    """Derive firewall action from rule name convention.
-    
-    UniFi rule naming: -A- = allow, -B- = block/drop, -R- = reject
+def derive_action(rule_name: str, rule_desc: str = None) -> str | None:
+    """Derive firewall action from rule name and optional description.
+
+    Returns 'allow'/'block'/'redirect' for legacy format,
+    desc_hint for zone_index format (e.g. 'block' from 'Block Unauthorized Traffic'),
+    None for zone_index with no description match (needs policy lookup later),
+    'allow' for unrecognized names, None for empty/None input.
     """
     if not rule_name:
         return None
-    if 'DNAT' in rule_name or 'PREROUTING' in rule_name:
-        return 'redirect'
-    if '-A-' in rule_name:
-        return 'allow'
-    if '-B-' in rule_name or '-D-' in rule_name:
-        return 'block'
-    if '-R-' in rule_name:
-        return 'block'
-    return 'allow'  # Default for custom rules without convention
+    from firewall_policy_matcher import parse_firewall_rule
+    parsed = parse_firewall_rule(rule_name, rule_desc=rule_desc)
+    if parsed is None:
+        return 'allow'  # unrecognized → default allow (backward compat)
+    # For zone_index: resolved_action is None here; use desc_hint as best-effort.
+    # The enricher will later call resolve_rule_action() to upgrade from policy metadata.
+    return parsed['resolved_action'] or parsed.get('desc_hint')
 
 
 def extract_mac(mac_raw: str) -> str:
@@ -340,7 +341,7 @@ def parse_firewall(body: str) -> dict:
     m = FW_MAC.search(body)
     result['mac_address'] = extract_mac(m.group(1)) if m else None
 
-    result['rule_action'] = derive_action(result['rule_name'])
+    result['rule_action'] = derive_action(result['rule_name'], result.get('rule_desc'))
     result['direction'] = derive_direction(
         result['interface_in'], result['interface_out'], result['rule_name'],
         result.get('src_ip'), result.get('dst_ip')

@@ -15,7 +15,9 @@ const TIME_RANGES = [
   { value: '180d', label: '180d' },
   { value: '365d', label: '365d' },
 ]
-const ACTIONS = ['allow', 'block', 'redirect']
+const ACTIONS = ['allow', 'block', 'redirect', 'unknown']
+const ACTION_LABELS = { allow: 'ALLOW', block: 'BLOCK', redirect: 'REDIRECT', unknown: 'UNK' }
+const ACTION_TOOLTIPS = { unknown: 'Unknown action type' }
 const DIRECTIONS = ['inbound', 'outbound', 'inter_vlan', 'nat']
 
 const RESET_FILTERS = {
@@ -282,13 +284,14 @@ export default function FilterBar({ filters, onChange, maxFilterDays, prefetched
             <button
               key={action}
               onClick={() => toggleAction(action)}
+              title={ACTION_TOOLTIPS[action] || undefined}
               className={`px-2 py-[3px] rounded text-xs font-medium uppercase border transition-all ${
                 activeActions.includes(action)
                   ? ACTION_STYLES[action]
                   : 'border-transparent text-gray-500 hover:text-gray-400'
               }`}
             >
-              {action}
+              {ACTION_LABELS[action] || action}
             </button>
           ))}
         </div>

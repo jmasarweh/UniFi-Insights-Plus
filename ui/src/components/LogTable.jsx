@@ -124,7 +124,11 @@ function LogRow({ log, isExpanded, detailedLog, onToggle, hiddenColumns, colCoun
         {/* Action (combined Type + Action on mobile) */}
         <td className="px-1 sm:px-2 py-1.5 text-center sm:text-left">
           {/* Desktop: action badge */}
-          {(log.rule_action || log.dhcp_event || log.wifi_event) ? (
+          {log.log_type === 'firewall' && log.rule_action == null ? (
+            <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border border-gray-600 bg-gray-800/50 text-gray-400">
+              unknown
+            </span>
+          ) : (log.rule_action || log.dhcp_event || log.wifi_event) ? (
             <span className={`hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border ${actionStyle}`}>
               {log.rule_action || log.dhcp_event || log.wifi_event}
             </span>
@@ -141,6 +145,14 @@ function LogRow({ log, isExpanded, detailedLog, onToggle, hiddenColumns, colCoun
                     {UNIFI_FIREWALL_ICON}
                   </svg>
                   <span className="sr-only">Firewall {log.rule_action}</span>
+                </>
+              ) : log.rule_action == null ? (
+                <>
+                  <svg className="w-5 h-5 text-gray-500"
+                       viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    {UNIFI_FIREWALL_ICON}
+                  </svg>
+                  <span className="sr-only">Firewall unknown</span>
                 </>
               ) : (
                 <>
