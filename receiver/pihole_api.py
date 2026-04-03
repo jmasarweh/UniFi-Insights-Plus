@@ -122,6 +122,8 @@ class PiHolePoller:
 
         # Version gate (checked once on first auth)
         self._version_checked = False
+        self._rate_limit_until = 0.0
+        self._first_poll_from = None
 
         # Config (loaded from DB + env)
         self.enabled = False
@@ -157,7 +159,8 @@ class PiHolePoller:
         self.poll_interval = int(os.environ.get('PIHOLE_POLL_INTERVAL', 0) or
                                  self._db.get_config('pihole_poll_interval', 60))
 
-        self.enrichment_enabled = self._db.get_config('pihole_enrichment', 'both') or 'both'
+        value = self._db.get_config('pihole_enrichment', 'both')
+        self.enrichment_enabled = value if value in ('none', 'geoip', 'threat', 'both') else 'both'
 
         self._last_cursor = int(self._db.get_config('pihole_last_cursor', 0))
 
@@ -191,13 +194,32 @@ class PiHolePoller:
         old_host = self.host
         old_enabled = self.enabled
 
+        # Close existing session before invalidating
+        if self._session:
+            try:
+                self._session.close()
+            except Exception:
+                logger.debug("Failed to close Pi-hole session on reload", exc_info=True)
+
         # Invalidate session and version gate on reload
         self._sid = None
         self._sid_obtained_at = 0.0
         self._session = None
         self._version_checked = False
 
+        old_cursor = self._last_cursor
         self._resolve_config()
+
+        # Reset first-poll window when starting fresh
+        if (old_host != self.host
+                or (old_cursor != 0 and self._last_cursor == 0)
+                or (not old_enabled and self.enabled)):
+            self._first_poll_from = None
+
+        # Invalidate DNS cache when host changes (answers from old Pi-hole are stale)
+        if old_host != self.host:
+            self._dns_cache = _DNSCache(maxsize=2000, ttl=300)
+
         logger.info("Pi-hole config reloaded (enabled=%s, host=%s)", self.enabled, self.host or '(none)')
 
         # Restart polling if it was running or if newly enabled
@@ -344,7 +366,7 @@ class PiHolePoller:
     def _ensure_auth(self):
         """Ensure we have a valid SID. Re-authenticate if expired or missing."""
         # Respect rate limit backoff
-        if hasattr(self, '_rate_limit_until') and time.monotonic() < self._rate_limit_until:
+        if self._rate_limit_until and time.monotonic() < self._rate_limit_until:
             remaining = self._rate_limit_until - time.monotonic()
             raise ConnectionError(f"Pi-hole auth rate-limited, {remaining:.0f}s remaining")
 
@@ -433,19 +455,27 @@ class PiHolePoller:
         flags = 0x0100  # standard query, recursion desired
         header = struct.pack('!HHHHHH', tx_id, flags, 1, 0, 0, 0)
 
-        # Encode domain name
+        # Encode domain name (IDNA-safe for internationalized domains)
         qname = b''
         for label in domain.rstrip('.').split('.'):
-            qname += bytes([len(label)]) + label.encode('ascii')
+            try:
+                encoded = label.encode('idna')
+            except UnicodeError:
+                return None
+            qname += bytes([len(encoded)]) + encoded
         qname += b'\x00'
         question = qname + struct.pack('!HH', rdtype, 1)  # class IN
 
         packet = header + question
 
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            addrinfo = socket.getaddrinfo(server, port, 0, socket.SOCK_DGRAM)
+            if not addrinfo:
+                return None
+            family, _, _, _, sockaddr = addrinfo[0]
+            with socket.socket(family, socket.SOCK_DGRAM) as sock:
                 sock.settimeout(timeout)
-                sock.sendto(packet, (server, port))
+                sock.sendto(packet, sockaddr)
                 data, _ = sock.recvfrom(1024)
         except (socket.timeout, OSError):
             return None
@@ -617,25 +647,49 @@ class PiHolePoller:
 
     # ── Polling ──────────────────────────────────────────────────────────────
 
+    FETCH_LIMIT = 10000
+
     def poll(self):
         """Fetch new queries from Pi-hole and insert them.
 
         Uses ID-based dedup: tracks the highest query ID seen and only
-        inserts records with id > last_cursor. The Pi-hole API returns
-        queries sorted by time desc, so we fetch all and filter by ID.
+        inserts records with id > last_cursor. Single large fetch avoids
+        offset-pagination seam loss on a mutable newest-first API.
         """
         try:
             params = {}
 
             if self._last_cursor == 0:
-                # First run: only fetch last 5 minutes
-                from_ts = int((datetime.now(tz=timezone.utc) - timedelta(minutes=5)).timestamp())
-                params['from'] = from_ts
+                # First run: only fetch last 5 minutes.
+                # Lock in the timestamp so retries use the same window.
+                if self._first_poll_from is None:
+                    self._first_poll_from = int(
+                        (datetime.now(tz=timezone.utc) - timedelta(minutes=5)).timestamp())
+                params['from'] = self._first_poll_from
                 logger.info("Pi-hole first poll: fetching queries from last 5 minutes")
 
+            # Single large fetch — treats the response as a practical snapshot.
+            # Avoids offset-pagination seam loss from queries arriving mid-scan.
+            params['length'] = self.FETCH_LIMIT
             data = self._api_get('/api/queries', params=params)
+            raw_queries = data.get('queries', [])
 
-            queries = data.get('queries', [])
+            # Filter to records above our cursor, deduped by ID
+            seen_ids = set()
+            queries = []
+            for q in raw_queries:
+                qid = q.get('id', 0)
+                if qid <= self._last_cursor:
+                    continue
+                if qid in seen_ids:
+                    continue
+                seen_ids.add(qid)
+                queries.append(q)
+
+            if len(raw_queries) >= self.FETCH_LIMIT:
+                logger.warning("Pi-hole returned %d queries (at fetch limit). "
+                               "Some older queries between polls may be skipped. "
+                               "Consider reducing poll interval.", len(raw_queries))
 
             if not queries:
                 with self._lock:
@@ -644,17 +698,9 @@ class PiHolePoller:
                 self._persist_poll_status(connected=True)
                 return
 
-            # Filter to only records newer than our last cursor
-            if self._last_cursor > 0:
-                queries = [q for q in queries if q.get('id', 0) > self._last_cursor]
-                if not queries:
-                    with self._lock:
-                        self._last_poll = datetime.now(tz=timezone.utc).isoformat()
-                        self._last_poll_error = None
-                    self._persist_poll_status(connected=True)
-                    return
-
-            # Compute new cursor from max ID in this batch
+            # Always advance cursor to max ID we fetched. On cap hit, some older
+            # records may be skipped — but holding the cursor would cause duplicates
+            # on every retry, which is worse for data quality.
             new_cursor = max(q.get('id', 0) for q in queries)
 
             # Batch resolve domains
@@ -697,6 +743,11 @@ class PiHolePoller:
         self.stop_polling()
 
         if not self.enabled:
+            # Clear stale poll status so UI doesn't show "Active" from a previous session
+            try:
+                self._db.set_config('pihole_poll_status', None)
+            except Exception:
+                logger.debug("Failed to clear stale Pi-hole poll status", exc_info=True)
             return
 
         self._poll_stop = threading.Event()
@@ -843,3 +894,5 @@ class PiHolePoller:
             return {'success': False, 'error': f'Connection to {test_host} timed out'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+        finally:
+            session.close()

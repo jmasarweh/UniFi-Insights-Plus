@@ -630,8 +630,8 @@ class Enricher:
                     self.abuseipdb.exclude_ip(ip)
                 for ip in get_config(db, 'gateway_ips') or []:
                     self._excluded_ips.add(ip)
-                self._pihole_enrichment = get_config(
-                    db, 'pihole_enrichment', 'both') or 'both'
+                value = get_config(db, 'pihole_enrichment', 'both')
+                self._pihole_enrichment = value if value in ('none', 'geoip', 'threat', 'both') else 'both'
             except Exception:
                 logger.debug("Failed to pre-load exclusions from DB", exc_info=True)
 
@@ -816,8 +816,8 @@ class Enricher:
         if self._db:
             try:
                 from db import get_config
-                self._pihole_enrichment = get_config(
-                    self._db, 'pihole_enrichment', 'both') or 'both'
+                value = get_config(self._db, 'pihole_enrichment', 'both')
+                self._pihole_enrichment = value if value in ('none', 'geoip', 'threat', 'both') else 'both'
             except Exception:
                 logger.debug("Failed to reload pihole_enrichment config", exc_info=True)
 

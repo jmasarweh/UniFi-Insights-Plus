@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { fetchPiholeSettings, updatePiholeSettings, testPiholeConnection } from '../api'
 import InfoTooltip from './InfoTooltip'
 import piholeLogo from '../assets/pihole-logo.png'
@@ -33,13 +33,18 @@ export default function SettingsPihole() {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [testPassed, setTestPassed] = useState(false)
+  const [polling, setPolling] = useState(false)
+  const [disabling, setDisabling] = useState(false)
   const [loadError, setLoadError] = useState(null)
+  const pollTimerRef = useRef(null)
+  const saveTimerRef = useRef(null)
 
   const loadSettings = useCallback(async () => {
     try {
       const data = await fetchPiholeSettings()
       setSettings(data)
-      if (data?.status?.connected) setTestPassed(true)
+      setLoadError(null)
+      if (data?.status?.connected) { setTestPassed(true); setPolling(false) }
       setDraft(prev => {
         if (!prev) return { ...data, password: '' }
         return { ...prev, ...data, password: prev.password || '' }
@@ -51,6 +56,10 @@ export default function SettingsPihole() {
   }, [])
 
   useEffect(() => { loadSettings() }, [loadSettings])
+  useEffect(() => () => {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+  }, [])
 
   const hasChanges = useMemo(() => {
     if (!settings || !draft) return false
@@ -58,26 +67,53 @@ export default function SettingsPihole() {
       || (draft.enabled && !settings.enabled)
       || draft.poll_interval !== settings.poll_interval
       || draft.enrichment !== settings.enrichment
-      || (draft.password && draft.password.length > 0)
+      || (!!draft.password)
   }, [settings, draft])
 
   // Require passing test when enabling or changing host/password
   const needsTest = useMemo(() => {
     if (!settings || !draft) return false
     return (draft.enabled && !settings.enabled) || draft.host !== settings.host
-      || (draft.password && draft.password.length > 0)
+      || (!!draft.password)
   }, [settings, draft])
 
+  // Block save if enabling without a host configured
   const canSave = hasChanges && (!needsTest || testPassed)
+    && !(draft?.enabled && !draft?.host)
 
   async function handleSave() {
     setSaving(true)
     setSaveStatus(null)
+    setTestResult(null)
     try {
       await updatePiholeSettings(draft)
       setSaveStatus({ type: 'saved', text: 'Settings saved' })
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(() => setSaveStatus(null), 3000)
       setDraft(prev => ({ ...prev, password: '' }))
-      await loadSettings()
+      if (draft.enabled && !settings.enabled) {
+        setPolling(true)
+        if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
+        // Poll until status shows connected (max 10 attempts, 2s apart)
+        let attempts = 0
+        const pollStatus = async () => {
+          if (attempts >= 10) { setPolling(false); return }
+          attempts++
+          try {
+            const data = await fetchPiholeSettings()
+            setSettings(data)
+            if (data?.status?.connected) {
+              setTestPassed(true)
+              setPolling(false)
+              return
+            }
+          } catch (err) { console.debug('Pi-hole status poll retry:', err) }
+          pollTimerRef.current = setTimeout(pollStatus, 2000)
+        }
+        pollTimerRef.current = setTimeout(pollStatus, 2000)
+      } else {
+        await loadSettings()
+      }
     } catch (e) {
       setSaveStatus({ type: 'error', text: e.message })
     } finally {
@@ -140,15 +176,17 @@ export default function SettingsPihole() {
             </span>
             <span className={`flex items-center gap-1.5 text-sm leading-none ${
               settings?.status?.connected ? 'text-emerald-400'
+                : polling ? 'text-yellow-400'
                 : settings?.enabled ? 'text-red-400'
                 : 'text-gray-500'
             }`}>
               <span className={`w-1.5 h-1.5 rounded-full block ${
                 settings?.status?.connected ? 'bg-emerald-400'
+                  : polling ? 'bg-yellow-400 animate-pulse'
                   : settings?.enabled ? 'bg-red-400'
                   : 'bg-gray-500'
               }`} />
-              {settings?.status?.connected ? 'Active' : settings?.enabled ? 'Offline' : 'Inactive'}
+              {settings?.status?.connected ? 'Active' : polling ? 'Polling' : settings?.enabled ? 'Offline' : 'Inactive'}
             </span>
           </div>
           {settings?.status?.last_poll && (
@@ -169,21 +207,23 @@ export default function SettingsPihole() {
               </div>
               <button
                 onClick={() => {
+                  if (disabling) return
                   if (draft.enabled) {
                     // Disable takes effect immediately
+                    setDisabling(true)
                     setDraft(d => ({ ...d, enabled: false }))
-                    updatePiholeSettings({ ...draft, enabled: false }).then(() => {
+                    updatePiholeSettings({ enabled: false }).then(() => {
                       loadSettings()
                     }).catch((e) => {
                       setDraft(d => ({ ...d, enabled: true }))
                       setSaveStatus({ type: 'error', text: e.message || 'Failed to disable' })
-                    })
+                    }).finally(() => setDisabling(false))
                   } else if (testPassed) {
                     // Enable requires passing test first
                     setDraft(d => ({ ...d, enabled: true }))
                   }
                 }}
-                disabled={!draft.enabled && !testPassed}
+                disabled={disabling || (!draft.enabled && !testPassed)}
                 className={`px-3 py-1 rounded text-sm font-semibold border transition-colors ${
                   draft.enabled
                     ? 'bg-green-500/10 text-green-300 border-green-500/40'
@@ -244,7 +284,7 @@ export default function SettingsPihole() {
             <div>
               <label className="text-sm font-medium text-gray-200 block mb-1">Enrichment</label>
               <select
-                value={draft.enrichment || 'none'}
+                value={draft.enrichment || 'both'}
                 onChange={e => setDraft(prev => ({ ...prev, enrichment: e.target.value }))}
                 className={INPUT_CLS}
               >

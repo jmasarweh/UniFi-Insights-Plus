@@ -26,6 +26,8 @@ def update_pihole_settings(body: dict):
 
     if 'enabled' in body:
         set_config(enricher_db, 'pihole_enabled', body['enabled'])
+        if not body['enabled']:
+            set_config(enricher_db, 'pihole_poll_status', None)
     if 'host' in body:
         set_config(enricher_db, 'pihole_host', body['host'])
     if 'password' in body:
