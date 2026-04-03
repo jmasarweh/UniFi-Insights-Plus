@@ -26,6 +26,7 @@ from enrichment import Enricher
 from backfill import BackfillTask
 from blacklist import BlacklistFetcher
 from unifi_api import UniFiAPI
+from pihole_api import PiHolePoller
 from routes.auth import auth_cleanup
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -366,8 +367,14 @@ def main():
     # Initialize UniFi API client (self-disables when not configured)
     unifi_api = UniFiAPI(db=db)
 
+    # Initialize Pi-hole poller
+    pihole = PiHolePoller(db=db, enricher=None)  # enricher set after creation
+
     # Initialize enrichment (with UniFi device name resolution)
     enricher = Enricher(db=db, unifi=unifi_api)
+
+    # Wire enricher into Pi-hole poller (created before enricher for signal handler)
+    pihole.set_enricher(enricher)
 
     # Start receiver
     receiver = SyslogReceiver(db, enricher)
@@ -377,6 +384,7 @@ def main():
         logger.info("Received signal %d, shutting down...", signum)
         receiver.stop()
         unifi_api.stop_polling()
+        pihole.stop_polling()
         enricher.close()
         db.close()
         sys.exit(0)
@@ -392,6 +400,8 @@ def main():
         logger.info("Received SIGUSR2, reloading config from database...")
         parsers.reload_config_from_db(db)
         unifi_api.reload_config()
+        pihole.reload_config()
+        enricher.reload_config()
         receiver._load_disabled_types()
 
         # Write timestamp to confirm reload completed
@@ -420,12 +430,16 @@ def main():
     # Start UniFi client/device polling (only runs if enabled)
     unifi_api.start_polling()
 
+    # Start Pi-hole polling (only runs if enabled)
+    pihole.start_polling()
+
     # Start receiving (blocks)
     try:
         receiver.start()
     except KeyboardInterrupt:
         receiver.stop()
         unifi_api.stop_polling()
+        pihole.stop_polling()
         enricher.close()
         db.close()
 

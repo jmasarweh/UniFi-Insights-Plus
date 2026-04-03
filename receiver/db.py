@@ -244,6 +244,7 @@ class Database:
                 abuse_is_tor BOOLEAN,
                 src_device_name TEXT,
                 dst_device_name TEXT,
+                remote_ip   INET,
                 raw_log     TEXT NOT NULL,
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             )""",
@@ -851,6 +852,18 @@ END $$;""",
             with conn.cursor() as cur:
                 cur.execute(INSERT_SQL, values)
 
+    def _execute_log_insert(self, cur, logs: list[dict]):
+        """Shared insert helper: build rows and execute_batch on a caller-owned cursor.
+
+        Does NOT commit, rollback, or manage connections — caller controls the
+        transaction boundary.  Used by both syslog (with fallback) and Pi-hole
+        (strict, no fallback) insert paths.
+        """
+        rows = [tuple(log.get(col) for col in INSERT_COLUMNS) for log in logs]
+        cur.execute("SET LOCAL statement_timeout = '30s'")
+        extras.execute_batch(cur, INSERT_SQL, rows, page_size=100)
+        return len(rows)
+
     def insert_logs_batch(self, logs: list[dict]):
         """Insert multiple parsed log entries in a single transaction.
 
@@ -861,22 +874,17 @@ END $$;""",
         if not logs:
             return
 
-        rows = [
-            tuple(log.get(col) for col in INSERT_COLUMNS)
-            for log in logs
-        ]
-
         try:
             with self.get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SET LOCAL statement_timeout = '30s'")
-                    extras.execute_batch(cur, INSERT_SQL, rows, page_size=100)
+                    self._execute_log_insert(cur, logs)
             logger.debug("Batch inserted %d logs", len(logs))
         except Exception as batch_err:
             logger.warning("Batch insert failed (%s), falling back to row-by-row for %d logs",
                           batch_err, len(logs))
             inserted = 0
             dropped = 0
+            rows = [tuple(log.get(col) for col in INSERT_COLUMNS) for log in logs]
             for row in rows:
                 try:
                     with self.get_conn() as conn:
@@ -888,6 +896,35 @@ END $$;""",
                     dropped += 1
                     logger.warning("Dropped bad log row: %s — raw: %.200s", row_err, row[-1] if row else '?')
             logger.info("Row-by-row fallback: %d inserted, %d dropped", inserted, dropped)
+
+    def insert_pihole_batch(self, logs: list[dict], new_cursor: int):
+        """Atomic insert of Pi-hole logs + cursor update. No row-by-row fallback.
+
+        Uses _execute_log_insert() for the shared insert logic, then updates
+        the cursor in the same transaction.  On ANY failure the entire
+        transaction rolls back — no partial inserts, no cursor drift.
+        """
+        if not logs:
+            return
+        conn = self.pool.getconn()
+        failed = False
+        try:
+            with conn.cursor() as cur:
+                self._execute_log_insert(cur, logs)
+                cur.execute(
+                    """INSERT INTO system_config (key, value, updated_at)
+                       VALUES ('pihole_last_cursor', %s::jsonb, NOW())
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()""",
+                    [str(new_cursor)]
+                )
+            conn.commit()
+            logger.debug("Pi-hole batch: inserted %d logs, cursor=%d", len(logs), new_cursor)
+        except Exception:
+            failed = True
+            conn.rollback()
+            raise
+        finally:
+            self.pool.putconn(conn, close=failed)
 
     # ── Retention cleanup ────────────────────────────────────────────────────
 

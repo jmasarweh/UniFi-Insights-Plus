@@ -30,6 +30,7 @@ from routes.flows import router as flows_router
 from routes.mcp import router as mcp_router
 from routes.views import router as views_router
 from routes.migration import router as migration_router
+from routes.pihole import router as pihole_router
 from routes.auth import (
     router as auth_router, require_auth,
     get_forwarded_proto, get_real_client_ip, _auth_enabled,
@@ -271,6 +272,7 @@ app.include_router(flows_router)
 app.include_router(mcp_router)
 app.include_router(views_router)
 app.include_router(migration_router)
+app.include_router(pihole_router)
 
 
 # ── Startup: verify all /api/ routes are covered by auth policy ─────────────

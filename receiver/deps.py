@@ -17,6 +17,7 @@ from psycopg2 import extensions, pool
 from db import Database, build_conn_params, wait_for_postgres
 from enrichment import AbuseIPDBEnricher
 from unifi_api import UniFiAPI
+from pihole_api import PiHolePoller
 
 logger = logging.getLogger('api')
 
@@ -101,6 +102,9 @@ abuseipdb = AbuseIPDBEnricher(db=enricher_db)
 
 unifi_api = UniFiAPI(db=enricher_db)
 
+# ── Pi-hole Poller ─────────────────────────────────────────────────────────
+
+pihole_poller = PiHolePoller(db=enricher_db, enricher=None)
 
 # ── Caching ──────────────────────────────────────────────────────────────────
 
@@ -128,6 +132,22 @@ def ttl_cache(seconds=30):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def get_config_source(db, key: str, env_map: dict, db_prefix: str) -> str:
+    """Shared config-source resolver: returns 'env', 'db', or 'default'.
+
+    Used by UniFi and Pi-hole integrations to report where each setting
+    value came from (environment variable, database, or built-in default).
+    """
+    env_var = env_map.get(key)
+    if env_var and os.environ.get(env_var):
+        return 'env'
+    db_key = f'{db_prefix}_{key}'
+    val = db.get_config(db_key)
+    if val is not None and val != '':
+        return 'db'
+    return 'default'
+
 
 def signal_receiver():
     """Signal the receiver process to reload config."""

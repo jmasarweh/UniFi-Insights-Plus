@@ -612,14 +612,16 @@ class Enricher:
         self._db = db
         self._known_wan_ip = None
         self._excluded_ips = set()  # WAN IPs, gateway IPs — not enrichable
+        self._pihole_enrichment = 'both'  # none|geoip|threat|both
         # @coderabbit Accessed only from the single-threaded UDP receive/enrich
         # loop today, so this coalescing map intentionally does not use a lock.
         # If enrich() is ever called concurrently, revisit Enricher shared-state
         # locking.
         self._recently_touched = {}  # {ip: monotonic_time} — coalescing set for DB writes
 
-        # Pre-load WAN/gateway exclusions from DB so background threads
-        # (backfill) have exclusions before the first enrich() call
+        # Pre-load WAN/gateway exclusions and pihole config from DB so
+        # background threads (backfill) have exclusions before the first
+        # enrich() call
         if db:
             try:
                 from db import get_config, get_wan_ips_from_config
@@ -628,6 +630,8 @@ class Enricher:
                     self.abuseipdb.exclude_ip(ip)
                 for ip in get_config(db, 'gateway_ips') or []:
                     self._excluded_ips.add(ip)
+                self._pihole_enrichment = get_config(
+                    db, 'pihole_enrichment', 'both') or 'both'
             except Exception:
                 logger.debug("Failed to pre-load exclusions from DB", exc_info=True)
 
@@ -697,10 +701,15 @@ class Enricher:
         if self.unifi and self.unifi.enabled:
             try:
                 if src_ip and not src_remote:
-                    parsed['src_device_name'] = self.unifi.resolve_name(
-                        ip=src_ip, mac=parsed.get('mac_address'))
+                    parsed['src_device_name'] = (
+                        self.unifi.resolve_name(ip=src_ip, mac=parsed.get('mac_address'))
+                        or parsed.get('src_device_name')
+                    )
                 if dst_ip and not dst_remote:
-                    parsed['dst_device_name'] = self.unifi.resolve_name(ip=dst_ip)
+                    parsed['dst_device_name'] = (
+                        self.unifi.resolve_name(ip=dst_ip)
+                        or parsed.get('dst_device_name')
+                    )
             except Exception:
                 logger.debug("Device name resolution failed for src=%s dst=%s", src_ip, dst_ip, exc_info=True)
 
@@ -742,17 +751,30 @@ class Enricher:
         if not ip_to_enrich:
             return parsed
 
-        # GeoIP + ASN (always, local lookup)
-        geo_data = self.geoip.lookup(ip_to_enrich)
-        parsed.update(geo_data)
+        # GeoIP + ASN (always, local lookup — unless pihole with geoip disabled)
+        is_pihole = parsed.get('source') == 'pihole'
+        if not is_pihole or self._pihole_enrichment in ('geoip', 'both'):
+            geo_data = self.geoip.lookup(ip_to_enrich)
+            parsed.update(geo_data)
 
-        # rDNS (always for public IPs)
-        rdns_data = self.rdns.lookup(ip_to_enrich)
-        if rdns_data.get('rdns'):
-            parsed['rdns'] = rdns_data['rdns']
+        # rDNS (skip for pihole — domain already in dns_query)
+        if not is_pihole:
+            rdns_data = self.rdns.lookup(ip_to_enrich)
+            if rdns_data.get('rdns'):
+                parsed['rdns'] = rdns_data['rdns']
 
-        # AbuseIPDB (only for blocked firewall events)
-        if (parsed.get('log_type') == 'firewall'
+        # AbuseIPDB (blocked firewall events, or pihole with threat enabled)
+        if (is_pihole and self._pihole_enrichment in ('threat', 'both')):
+            threat_data = self.abuseipdb.lookup(ip_to_enrich)
+            if threat_data:
+                parsed.update(threat_data)
+                if self._db and not self._is_recently_touched(ip_to_enrich):
+                    try:
+                        self._db.touch_threat_last_seen(ip_to_enrich)
+                    except Exception:
+                        logger.debug("touch_threat_last_seen failed for %s", ip_to_enrich, exc_info=True)
+                    self._recently_touched[ip_to_enrich] = time.monotonic()
+        elif (parsed.get('log_type') == 'firewall'
                 and parsed.get('rule_action') == 'block'):
             threat_data = self.abuseipdb.lookup(ip_to_enrich)
             if threat_data:
@@ -788,6 +810,16 @@ class Enricher:
 
     def close(self):
         self.geoip.close()
+
+    def reload_config(self):
+        """Reload enrichment config from DB (called via SIGUSR2)."""
+        if self._db:
+            try:
+                from db import get_config
+                self._pihole_enrichment = get_config(
+                    self._db, 'pihole_enrichment', 'both') or 'both'
+            except Exception:
+                logger.debug("Failed to reload pihole_enrichment config", exc_info=True)
 
     def reload_geoip(self):
         """Reload GeoIP databases (called via SIGUSR1)."""

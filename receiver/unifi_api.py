@@ -181,22 +181,17 @@ class UniFiAPI:
         if was_polling or self.enabled:
             self.start_polling()
 
+    _ENV_MAP = {
+        'host': 'UNIFI_HOST',
+        'api_key': 'UNIFI_API_KEY',
+        'site': 'UNIFI_SITE',
+        'verify_ssl': 'UNIFI_VERIFY_SSL',
+    }
+
     def get_config_source(self, key: str) -> str:
         """Return 'env', 'db', or 'default' for a config key."""
-        env_map = {
-            'host': 'UNIFI_HOST',
-            'api_key': 'UNIFI_API_KEY',
-            'site': 'UNIFI_SITE',
-            'verify_ssl': 'UNIFI_VERIFY_SSL',
-        }
-        env_var = env_map.get(key)
-        if env_var and os.environ.get(env_var):
-            return 'env'
-        db_key = f'unifi_{key}'
-        val = self._db.get_config(db_key)
-        if val is not None and val != '':
-            return 'db'
-        return 'default'
+        from deps import get_config_source
+        return get_config_source(self._db, key, self._ENV_MAP, 'unifi')
 
     # ── HTTP Session ──────────────────────────────────────────────────────────
 
@@ -1237,6 +1232,11 @@ class UniFiAPI:
                                               name='unifi-poller')
         self._poll_thread.start()
         logger.info("UniFi polling started (interval=%ds)", poll_interval)
+
+    def has_device_names(self) -> bool:
+        """Return True when the IP-to-name cache has been populated."""
+        with self._lock:
+            return bool(self._ip_to_name)
 
     def resolve_name(self, ip: str | None = None, mac: str | None = None) -> str | None:
         """Resolve device name by IP or MAC from in-memory cache.
