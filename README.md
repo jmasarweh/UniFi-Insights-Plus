@@ -1,21 +1,33 @@
-# UniFi Insights Plus (formerly Unifi Log Insight) [![GitHub Stars](https://img.shields.io/github/stars/jmasarweh/Unifi-Log-Insights)](https://github.com/jmasarweh/Unifi-Log-Insights/stargazers) 
+<p align="center">
+  <img src="ui/public/image.png" alt="UniFi Insights Plus" />
+</p>
 
-[![GitHub Release](https://img.shields.io/github/v/release/jmasarweh/Unifi-Log-Insights)](https://github.com/jmasarweh/Unifi-Log-Insights/releases/latest)
-[![Downloads](https://img.shields.io/badge/downloads-16k+-blue)](https://github.com/jmasarweh/Unifi-Log-Insights/pkgs/container/unifi-log-insight) [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/dlpkbnjhbhkijfkgnmnbohbokdfoimge?label=chrome-extension)](https://chromewebstore.google.com/detail/unifi-insights-plus/dlpkbnjhbhkijfkgnmnbohbokdfoimge)
-[![Firefox Add-ons](https://img.shields.io/amo/v/unifi-insights-plus?label=firefox-addon)](https://addons.mozilla.org/en-US/firefox/addon/unifi-insights-plus/) [![Tests](https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/test.yml?branch=main&label=tests)](https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/test.yml)
-[![Docker Build](https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/docker-publish.yml?label=docker%20build)](https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/docker-publish.yml)
-
-
-[![License](https://img.shields.io/badge/license-BSL%201.1-orange)](LICENSE)
-
-Real-time log analysis for UniFi routers and gateways - captures syslog over UDP, parses firewall, DHCP, Wi-Fi, and system events, enriches them with GeoIP, ASN, threat intelligence, and reverse DNS, then serves everything through a live Dashboard.
-
-Single Docker container. No external dependencies. Zero data collection.
-
-> **For full documentation — installation, configuration, integrations, and more — visit [insightsplus.dev/docs](https://insightsplus.dev/docs).**
+<h1 align="center">UniFi Insights Plus <a href="https://github.com/jmasarweh/Unifi-Log-Insights/stargazers"><img src="https://img.shields.io/github/stars/jmasarweh/Unifi-Log-Insights" alt="GitHub Stars" /></a></h1>
 
 <p align="center">
-<a href="#-features">Features</a> · <a href="#-prerequisites">Prerequisites</a> · <a href="#-app-screenshots">Screenshots</a>
+  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/releases/latest"><img src="https://img.shields.io/github/v/release/jmasarweh/Unifi-Log-Insights" alt="GitHub Release" /></a>
+  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/pkgs/container/unifi-log-insight"><img src="https://img.shields.io/badge/downloads-16k+-blue" alt="Downloads" /></a>
+  <a href="https://chromewebstore.google.com/detail/unifi-insights-plus/dlpkbnjhbhkijfkgnmnbohbokdfoimge"><img src="https://img.shields.io/chrome-web-store/v/dlpkbnjhbhkijfkgnmnbohbokdfoimge?label=chrome-extension" alt="Chrome Web Store" /></a>
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/unifi-insights-plus/"><img src="https://img.shields.io/amo/v/unifi-insights-plus?label=firefox-addon" alt="Firefox Add-ons" /></a>
+  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/test.yml?branch=main&label=tests" alt="Tests" /></a>
+  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/docker-publish.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/docker-publish.yml?label=docker%20build" alt="Docker Build" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%201.1-orange" alt="License" /></a>
+</p>
+
+<p align="center">
+  Real-time log analysis for UniFi routers and gateways - captures syslog over UDP, parses firewall, DHCP, Wi-Fi, and system events, enriches them with GeoIP, ASN, threat intelligence, and reverse DNS, then serves everything through a live Dashboard.
+</p>
+
+<p align="center">
+  Single Docker container. No external dependencies. Zero data collection.
+</p>
+
+<p align="center">
+  <strong>For full documentation, visit <a href="https://insightsplus.dev/docs">insightsplus.dev/docs</a></strong>
+</p>
+
+<p align="center">
+  <a href="#-features">Features</a> · <a href="#-prerequisites">Prerequisites</a> · <a href="#-app-screenshots">Screenshots</a>
 </p>
 
 ---
