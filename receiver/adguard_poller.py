@@ -45,7 +45,7 @@ class AdGuardHomePoller:
         self._username = get_config(self._db, 'adguard_username', 'admin') or 'admin'
         enc            = get_config(self._db, 'adguard_password_enc', '') or ''
         self._password = decrypt_api_key(enc) if enc else ''
-        self._interval = max(15, int(get_config(self._db, 'adguard_poll_interval', 30) or 30))
+        self._interval = max(15, min(86400, int(get_config(self._db, 'adguard_poll_interval', 30) or 30)))
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 

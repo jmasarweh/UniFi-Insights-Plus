@@ -12,6 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from adguard_poller import test_connection
 from db import get_config, set_config, encrypt_api_key
 from deps import enricher_db, signal_receiver, get_conn, put_conn
 
@@ -106,7 +107,6 @@ def test_adguard_connection(body: AdGuardTestRequest):
 
     Returns version and running status on success, or 400 with an error message.
     """
-    from adguard_poller import test_connection
     try:
         info = test_connection(body.host, body.username, body.password)
     except Exception as e:

@@ -127,6 +127,25 @@ export default function SettingsAdguard() {
     }
   }
 
+  async function handleToggle() {
+    if (disabling) return
+    if (draft.enabled) {
+      setDisabling(true)
+      setDraft(d => ({ ...d, enabled: false }))
+      try {
+        await updateAdguardConfig({ ...draft, enabled: false })
+        await loadConfig()
+      } catch (e) {
+        setDraft(d => ({ ...d, enabled: true }))
+        setSaveStatus({ type: 'error', text: e.message || 'Failed to disable' })
+      } finally {
+        setDisabling(false)
+      }
+    } else if (testPassed) {
+      setDraft(d => ({ ...d, enabled: true }))
+    }
+  }
+
   if (loadError) {
     return (
       <div className="text-sm text-red-400">
@@ -181,21 +200,7 @@ export default function SettingsAdguard() {
                 <p className="text-sm text-gray-500">Ingest DNS query logs from AdGuard Home v0.107+.</p>
               </div>
               <button
-                onClick={() => {
-                  if (disabling) return
-                  if (draft.enabled) {
-                    setDisabling(true)
-                    setDraft(d => ({ ...d, enabled: false }))
-                    updateAdguardConfig({ ...draft, enabled: false }).then(() => {
-                      loadConfig()
-                    }).catch(e => {
-                      setDraft(d => ({ ...d, enabled: true }))
-                      setSaveStatus({ type: 'error', text: e.message || 'Failed to disable' })
-                    }).finally(() => setDisabling(false))
-                  } else if (testPassed) {
-                    setDraft(d => ({ ...d, enabled: true }))
-                  }
-                }}
+                onClick={handleToggle}
                 disabled={disabling || (!draft.enabled && !testPassed)}
                 className={`px-3 py-1 rounded text-sm font-semibold border transition-colors ${
                   draft.enabled
