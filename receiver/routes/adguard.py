@@ -8,7 +8,6 @@ GET  /api/adguard/stats         — recent query log stats from adguard_logs tab
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -73,9 +72,12 @@ def put_adguard_config(body: AdGuardConfig):
             detail='poll_interval must be between 15 and 86400 seconds',
         )
 
-    set_config(enricher_db, 'adguard_enabled',      body.enabled)
-    set_config(enricher_db, 'adguard_host',         body.host.rstrip('/'))
-    set_config(enricher_db, 'adguard_username',     body.username)
+    # Read stored host BEFORE writing so the comparison is against the old value.
+    stored_host = (get_config(enricher_db, 'adguard_host', '') or '').rstrip('/')
+
+    set_config(enricher_db, 'adguard_enabled',       body.enabled)
+    set_config(enricher_db, 'adguard_host',          body.host.rstrip('/'))
+    set_config(enricher_db, 'adguard_username',      body.username)
     set_config(enricher_db, 'adguard_poll_interval', body.poll_interval)
 
     if body.password and body.password != _PASSWORD_PLACEHOLDER:
@@ -84,11 +86,9 @@ def put_adguard_config(body: AdGuardConfig):
         except ValueError as e:
             raise HTTPException(status_code=500, detail=f'Encryption failed: {e}')
 
-    # Clear cursor when host changes so the poller starts fresh
-    if body.host:
-        stored_host = get_config(enricher_db, 'adguard_host', '')
-        if body.host.rstrip('/') != (stored_host or '').rstrip('/'):
-            set_config(enricher_db, 'adguard_cursor', None)
+    # Clear cursor when host changes so the poller re-fetches from the new instance.
+    if body.host.rstrip('/') != stored_host:
+        set_config(enricher_db, 'adguard_cursor', None)
 
     signal_receiver()
     return {'ok': True}
@@ -124,7 +124,17 @@ def get_adguard_stats():
                 WHERE table_schema = 'public' AND table_name = 'adguard_logs'
             """)
             if not cur.fetchone():
-                return {'enabled': False, 'total': 0}
+                # Table not yet created — return a consistent zero-state schema
+                # so callers never need to handle a partial response.
+                return {
+                    'enabled':        bool(get_config(enricher_db, 'adguard_enabled', False)),
+                    'total':          0,
+                    'blocked':        0,
+                    'cached':         0,
+                    'avg_elapsed_ms': None,
+                    'top_domains':    [],
+                    'top_clients':    [],
+                }
 
             cur.execute("""
                 SELECT

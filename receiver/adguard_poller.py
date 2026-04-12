@@ -120,11 +120,9 @@ class AdGuardHomePoller:
 
         self._refresh_clients()
         batch = [_parse_entry(e, self._clients) for e in entries]
-        inserted = self._db.insert_adguard_batch(batch)
-
-        # Advance cursor only after successful insert
-        if oldest:
-            self._db.set_config('adguard_cursor', oldest)
+        # Insert rows and advance the cursor in the same transaction so a
+        # mid-flight crash cannot leave the cursor ahead of persisted data.
+        inserted = self._db.insert_adguard_batch(batch, new_cursor=oldest)
 
         logger.debug("AdGuard: polled %d entries, inserted %d, cursor=%s",
                      len(entries), inserted, (oldest or '')[:30])

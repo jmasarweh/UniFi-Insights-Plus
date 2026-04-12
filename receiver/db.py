@@ -671,6 +671,9 @@ END $$;""",
                   AND service_name IS NULL
                   AND dst_port IS NOT NULL""",
             # ── AdGuard Home integration ──────────────────────────────────────
+            # adguard_logs is always created empty (new table), so the index
+            # builds below are instantaneous — ACCESS EXCLUSIVE lock risk is zero.
+            # CONCURRENTLY cannot run inside a transaction; it is not needed here.
             """CREATE TABLE IF NOT EXISTS adguard_logs (
                 id             BIGSERIAL PRIMARY KEY,
                 timestamp      TIMESTAMPTZ NOT NULL,
@@ -1024,10 +1027,13 @@ END $$;""",
                     logger.warning("Dropped bad log row: %s — raw: %.200s", row_err, row[-1] if row else '?')
             logger.info("Row-by-row fallback: %d inserted, %d dropped", inserted, dropped)
 
-    def insert_adguard_batch(self, entries: list[dict]) -> int:
-        """Insert a batch of AdGuard Home query log entries.
+    def insert_adguard_batch(self, entries: list[dict], new_cursor: str | None = None) -> int:
+        """Insert a batch of AdGuard Home query log entries and advance the cursor atomically.
 
-        Uses execute_batch for efficiency. Returns the number of rows inserted.
+        The cursor update (adguard_cursor in system_config) is committed in the
+        same transaction as the row inserts. This prevents the classic
+        post-insert-pre-cursor crash from causing duplicate rows on the next poll.
+        Returns the number of rows inserted.
         """
         if not entries:
             return 0
@@ -1045,7 +1051,16 @@ END $$;""",
         with self.get_conn() as conn:
             with conn.cursor() as cur:
                 extras.execute_batch(cur, sql, entries, page_size=100)
-                return cur.rowcount
+                inserted = cur.rowcount
+                if new_cursor:
+                    cur.execute(
+                        """INSERT INTO system_config (key, value, updated_at)
+                               VALUES ('adguard_cursor', %s::jsonb, NOW())
+                               ON CONFLICT (key) DO UPDATE
+                               SET value = EXCLUDED.value, updated_at = NOW()""",
+                        [Json(new_cursor)],
+                    )
+        return inserted
 
     def insert_pihole_batch(self, logs: list[dict], new_cursor: int):
         """Atomic insert of Pi-hole logs + cursor update. No row-by-row fallback.
