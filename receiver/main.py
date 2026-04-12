@@ -486,6 +486,7 @@ def main():
         receiver.start()
     except KeyboardInterrupt:
         receiver.stop()
+        adguard_poller.stop()
         unifi_api.stop_polling()
         pihole.stop_polling()
         enricher.close()

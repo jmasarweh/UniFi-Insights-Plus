@@ -111,13 +111,6 @@ CREATE INDEX IF NOT EXISTS idx_logs_spgist_dst_ip_firewall
 -- instead of O(total-rows-of-type) heap-sorts on large tables.
 CREATE INDEX IF NOT EXISTS idx_logs_type_id ON logs (log_type, id);
 
--- Partial index for non-DNS retention cleanup batches.
--- The non-DNS pass deletes WHERE log_type != 'dns' AND timestamp < cutoff.
--- Without this index the pass falls back to a sequential scan on large tables.
-CREATE INDEX IF NOT EXISTS idx_logs_nondns_timestamp
-    ON logs (timestamp DESC)
-    WHERE log_type != 'dns';
-
 -- AbuseIPDB threat score cache (persistent across restarts)
 CREATE TABLE IF NOT EXISTS ip_threats (
     ip              INET PRIMARY KEY,

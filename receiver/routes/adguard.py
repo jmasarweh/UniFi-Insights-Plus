@@ -72,6 +72,12 @@ def put_adguard_config(body: AdGuardConfig):
             detail='poll_interval must be between 15 and 86400 seconds',
         )
 
+    if body.enabled and not body.host.strip():
+        raise HTTPException(
+            status_code=400,
+            detail='host is required when AdGuard integration is enabled',
+        )
+
     # Read stored host BEFORE writing so the comparison is against the old value.
     stored_host = (get_config(enricher_db, 'adguard_host', '') or '').rstrip('/')
 
