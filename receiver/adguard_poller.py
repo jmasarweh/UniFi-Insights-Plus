@@ -31,6 +31,7 @@ paths is guarded by snapshotting into poll-local variables at the top of
 """
 
 import base64
+import ipaddress
 import logging
 import re
 import threading
@@ -65,8 +66,8 @@ class AdGuardHomePoller:
         self._db = db
         self._stop = threading.Event()
         self._thread = None
-        # IP → display name cache populated by /control/clients
-        self._clients: dict[str, str] = {}
+        # Structured client cache populated by /control/clients
+        self._clients: '_ClientCache' = _ClientCache()
         self._clients_refreshed = 0.0   # epoch seconds of last successful refresh
         self.reload_config()
 
@@ -83,8 +84,8 @@ class AdGuardHomePoller:
         new_host = (get_config(self._db, 'adguard_host', '') or '').rstrip('/')
 
         if new_host != getattr(self, '_host', ''):
-            # Host changed — clear cache so _refresh_clients hits the new instance.
-            self._clients = {}
+            # Host changed -- clear cache so _refresh_clients hits the new instance.
+            self._clients = _ClientCache()
             self._clients_refreshed = 0.0
 
         self._enabled  = bool(get_config(self._db, 'adguard_enabled', False))
@@ -108,18 +109,18 @@ class AdGuardHomePoller:
 
     # ── Client name cache ─────────────────────────────────────────────────────
 
-    def _refresh_clients(self, poll_host: str, poll_headers: dict) -> dict[str, str] | None:
-        """Fetch a fresh IP→name client cache from ``GET /control/clients``.
+    def _refresh_clients(self, poll_host: str, poll_headers: dict) -> '_ClientCache | None':
+        """Fetch a fresh client cache from ``GET /control/clients``.
 
-        Returns the new cache dict when the TTL has expired and the fetch
+        Returns a ``_ClientCache`` when the TTL has expired and the fetch
         succeeds, or ``None`` when the existing cache is still warm or the
         fetch fails.  The caller is responsible for publishing the returned
-        dict to ``self._clients`` / ``self._clients_refreshed`` — this method
+        cache to ``self._clients`` / ``self._clients_refreshed`` -- this method
         intentionally does **not** mutate shared state, so a discarded batch
         cannot poison the cache with stale data from the old host.
 
         ``poll_host`` and ``poll_headers`` must be the snapshot values
-        captured at the start of ``_poll()`` — **not** ``self._host`` — so
+        captured at the start of ``_poll()`` -- **not** ``self._host`` -- so
         that client names are always fetched from the same instance that
         provided the query log entries.
 
@@ -127,7 +128,7 @@ class AdGuardHomePoller:
         (``auto_clients``) because auto-detected names are less reliable.
         """
         if time.time() - self._clients_refreshed < _CLIENT_CACHE_TTL:
-            return None  # cache is still fresh — nothing to do
+            return None  # cache is still fresh -- nothing to do
 
         try:
             r = requests.get(
@@ -137,23 +138,42 @@ class AdGuardHomePoller:
             )
             r.raise_for_status()
             data = r.json()
-            cache: dict[str, str] = {}
 
-            # Auto-detected clients — lower priority, populated first so they
-            # can be overridden by configured entries below.
+            exact:    dict[str, str]                         = {}  # IP string -> name
+            networks: list[tuple[ipaddress.IPv4Network |
+                                 ipaddress.IPv6Network, str]] = []  # (network, name)
+            macs:     dict[str, str]                         = {}  # normalised MAC -> name
+
+            # Auto-detected clients -- lower priority, exact IPs only.
             for c in data.get('auto_clients', []):
                 if c.get('name') and c.get('ip'):
-                    cache[c['ip']] = c['name']
+                    exact[c['ip']] = c['name']
 
-            # Configured clients — higher priority, one entry can have multiple
-            # IDs (IPs, MACs, CIDRs) all mapped to the same display name.
+            # Configured clients -- higher priority, IDs may be IPs, CIDRs, or MACs.
             for c in data.get('clients', []):
                 name = c.get('name', '')
+                if not name:
+                    continue
                 for cid in c.get('ids', []):
-                    if name:
-                        cache[cid] = name
+                    cid = cid.strip()
+                    if '/' in cid:
+                        # CIDR notation
+                        try:
+                            networks.append((ipaddress.ip_network(cid, strict=False), name))
+                        except ValueError:
+                            pass
+                    elif ':' in cid and len(cid) in (17, 14):
+                        # MAC address (xx:xx:xx:xx:xx:xx or xx-xx-xx-xx-xx-xx)
+                        macs[_norm_mac(cid)] = name
+                    else:
+                        # Plain IP
+                        exact[cid] = name
 
-            logger.debug("AdGuard client cache refreshed: %d entries", len(cache))
+            cache = _ClientCache(exact=exact, networks=networks, macs=macs)
+            logger.debug(
+                "AdGuard client cache refreshed: %d exact, %d networks, %d MACs",
+                len(exact), len(networks), len(macs),
+            )
             return cache
 
         except (requests.RequestException, KeyError, ValueError) as e:
@@ -204,8 +224,16 @@ class AdGuardHomePoller:
         string to retain full precision across cycles.
         """
         # ── Snapshot config — isolates this poll from concurrent reload_config() calls
-        poll_host    = self._host
-        poll_headers = self._auth_header()
+        # Read host, username, and password in one shot so reload_config() cannot
+        # interleave and produce a mismatched (old host, new creds) combination.
+        poll_host, poll_username, poll_password = (
+            self._host, self._username, self._password
+        )
+        poll_headers = {
+            'Authorization': 'Basic ' + base64.b64encode(
+                f"{poll_username}:{poll_password}".encode()
+            ).decode()
+        }
         cursor_str   = get_config(self._db, 'adguard_cursor', None)
         cursor_dt    = _parse_ts(cursor_str)
 
@@ -322,9 +350,9 @@ class AdGuardHomePoller:
             return  # nothing new since the last poll
 
         # ── Resolve client names then build the insert batch ──────────────────
-        # _refresh_clients returns a new cache dict (or None if still warm).
+        # _refresh_clients returns a new _ClientCache (or None if still warm).
         # We hold it locally and only publish to self._clients after the insert
-        # succeeds — this prevents a discarded batch from marking the cache as
+        # succeeds -- this prevents a discarded batch from marking the cache as
         # "fresh" with data fetched from the old host.
         new_clients = self._refresh_clients(poll_host, poll_headers)
         clients_to_use = new_clients if new_clients is not None else self._clients
@@ -404,6 +432,67 @@ class AdGuardHomePoller:
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
+
+def _norm_mac(mac: str) -> str:
+    """Normalise a MAC address to lowercase hex without separators.
+
+    Accepts common formats: ``aa:bb:cc:dd:ee:ff``, ``AA-BB-CC-DD-EE-FF``.
+    Returns the 12-character lowercase hex string, e.g. ``aabbccddeeff``.
+    """
+    return re.sub(r'[:\-]', '', mac).lower()
+
+
+class _ClientCache:
+    """Resolved client name lookup supporting exact IPs, CIDRs, and MACs.
+
+    AdGuard Home client IDs can be plain IPs, CIDR ranges, or MAC addresses.
+    ``dict.get(client_ip)`` only handles exact IPs; this class adds CIDR
+    and MAC resolution so configured names are matched correctly.
+    """
+
+    def __init__(
+        self,
+        exact:    dict[str, str] | None = None,
+        networks: list[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, str]] | None = None,
+        macs:     dict[str, str] | None = None,
+    ):
+        self._exact    = exact    or {}
+        self._networks = networks or []
+        self._macs     = macs     or {}
+
+    def resolve(self, client_ip: str, client_mac: str = '') -> str | None:
+        """Return the configured display name for *client_ip* or *client_mac*.
+
+        Lookup order (highest to lowest priority):
+        1. Exact IP match in configured clients.
+        2. CIDR match in configured clients.
+        3. Normalised MAC match in configured clients.
+        4. Exact IP match in auto-detected clients (also stored in ``_exact``).
+        Returns ``None`` when no match is found.
+        """
+        # Exact IP lookup (covers both configured and auto-detected IPs).
+        if client_ip and client_ip in self._exact:
+            return self._exact[client_ip]
+
+        # CIDR lookup -- test client_ip against each configured network.
+        if client_ip:
+            try:
+                addr = ipaddress.ip_address(client_ip)
+                for net, name in self._networks:
+                    if addr in net:
+                        return name
+            except ValueError:
+                pass
+
+        # MAC lookup.
+        if client_mac:
+            normed = _norm_mac(client_mac)
+            if normed in self._macs:
+                return self._macs[normed]
+
+        return None
+
+
 def _parse_ts(ts: str) -> tuple[datetime, int] | None:
     """Parse an RFC3339/RFC3339Nano timestamp to a ``(datetime, nanoseconds)`` pair.
 
@@ -412,8 +501,8 @@ def _parse_ts(ts: str) -> tuple[datetime, int] | None:
         2026-04-13T18:10:52.123456789+02:00
 
     Returns a ``(aware_datetime, ns_int)`` tuple where ``ns_int`` is the full
-    fractional second expressed as nanoseconds (0–999 999 999).  Using the
-    tuple for all ordering comparisons preserves sub-microsecond precision —
+    fractional second expressed as nanoseconds (0-999 999 999).  Using the
+    tuple for all ordering comparisons preserves sub-microsecond precision -
     two entries that share the same microsecond but differ only in later digits
     are correctly ordered by the ``ns_int`` component.
 
@@ -426,7 +515,7 @@ def _parse_ts(ts: str) -> tuple[datetime, int] | None:
     """
     if not ts:
         return None
-    # Extract fractional-second digits (may be absent, 1–9 digits).
+    # Extract fractional-second digits (may be absent, 1-9 digits).
     frac_match = re.search(r'\.(\d+)', ts)
     ns_int = 0
     if frac_match:
@@ -441,32 +530,38 @@ def _parse_ts(ts: str) -> tuple[datetime, int] | None:
         return None
 
 
-def _parse_entry(e: dict, clients: dict[str, str]) -> dict:
+def _parse_entry(e: dict, clients: '_ClientCache') -> dict:
     """Map a raw AdGuard Home ``QueryLogItem`` to a flat dict for DB insert.
 
     Field mapping
     -------------
-    ``e['client']``        → client_ip (INET)
-    ``e['client_info']``   → client_name fallback when not in configured cache
-    ``e['question']``      → domain + record_type (e.g. A, AAAA, CNAME)
-    ``e['reason']``        → filter reason string (e.g. FilteredBlockList,
+    ``e['client']``        -> client_ip (INET)
+    ``e['client_info']``   -> client_name fallback when not in configured cache
+    ``e['question']``      -> domain + record_type (e.g. A, AAAA, CNAME)
+    ``e['reason']``        -> filter reason string (e.g. FilteredBlockList,
                              NotFilteredNotFound, Rewritten)
-    ``e['status']``        → DNS response status (NOERROR, NXDOMAIN, …)
-    ``e['upstream']``      → upstream resolver used (e.g. https://dns.cloudflare.com)
-    ``e['elapsedMs']``     → query round-trip time in milliseconds (float string)
-    ``e['cached']``        → True if the response was served from cache
-    ``e['answer_dnssec']`` → True if the answer was DNSSEC-validated
-    ``e['rules'][0]``      → first matching filter rule text and list ID
+    ``e['status']``        -> DNS response status (NOERROR, NXDOMAIN, ...)
+    ``e['upstream']``      -> upstream resolver used (e.g. https://dns.cloudflare.com)
+    ``e['elapsedMs']``     -> query round-trip time in milliseconds (float string)
+    ``e['cached']``        -> True if the response was served from cache
+    ``e['answer_dnssec']`` -> True if the answer was DNSSEC-validated
+    ``e['rules'][0]``      -> first matching filter rule text and list ID
     """
     client_ip   = e.get('client', '')
     q           = e.get('question') or {}
     rules       = e.get('rules') or []
     client_info = e.get('client_info') or {}
+    client_mac  = (client_info.get('whois_info') or {}).get('orgid') or ''
     return {
         'timestamp':      e.get('time'),
         'client_ip':      client_ip or None,
-        # Prefer the configured-client name; fall back to AdGuard's auto-resolved name.
-        'client_name':    clients.get(client_ip) or client_info.get('name') or None,
+        # Prefer the configured-client name (exact IP, CIDR, or MAC match);
+        # fall back to AdGuard's auto-resolved name from client_info.
+        'client_name':    (
+            clients.resolve(client_ip, client_mac)
+            or client_info.get('name')
+            or None
+        ),
         'domain':         q.get('name', ''),
         'record_type':    q.get('type', ''),
         'reason':         e.get('reason', ''),
