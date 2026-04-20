@@ -18,6 +18,7 @@ import psycopg2
 import psycopg2.errors
 from psycopg2 import pool, extras
 from psycopg2.extras import Json
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 logger = logging.getLogger(__name__)
 

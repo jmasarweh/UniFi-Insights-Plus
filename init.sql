@@ -128,6 +128,7 @@ ALTER TABLE logs SET (
 -- to operations taking > 60 s if the default produces too much volume.
 ALTER DATABASE "unifi_logs" SET log_autovacuum_min_duration = '0';
 
+
 -- AbuseIPDB threat score cache (persistent across restarts)
 CREATE TABLE IF NOT EXISTS ip_threats (
     ip              INET PRIMARY KEY,
