@@ -1035,6 +1035,10 @@ END $$;""",
     # ── Retention cleanup ────────────────────────────────────────────────────
 
     RETENTION_BATCH_SIZE = 5_000
+    # Only run an explicit VACUUM ANALYZE after cleanup when the number of
+    # deleted rows is above this threshold.  Trivial runs (a handful of rows)
+    # are handled by tuned autovacuum, avoiding the cost of a full-table scan.
+    VACUUM_MIN_DELETED = 1_000
 
     @staticmethod
     def validate_retention_days(general_days: int, dns_days: int):
@@ -1220,22 +1224,30 @@ END $$;""",
                     result['deleted_so_far'], result['dns_deleted'],
                     result['non_dns_deleted'], general_days, dns_days)
         if result['deleted_so_far'] > 0:
-            # Run VACUUM ANALYZE after bulk deletes so dead tuples are reclaimed
-            # immediately, not left for autovacuum to find on its next cycle.
+            # Only run an explicit VACUUM ANALYZE when enough rows were deleted
+            # to justify the full-table scan cost.  Smaller cleanups are handled
+            # promptly by the tuned autovacuum settings in init.sql.
             # VACUUM cannot run inside a transaction — use a dedicated ephemeral
             # connection (never returned to the pool) so autocommit mode cannot
             # leak back to other callers.
-            try:
-                vac_conn = psycopg2.connect(**self.conn_params)
+            if result['deleted_so_far'] >= self.VACUUM_MIN_DELETED:
                 try:
-                    vac_conn.autocommit = True
-                    with vac_conn.cursor() as cur:
-                        cur.execute("VACUUM ANALYZE logs")
-                    logger.info("Post-cleanup VACUUM ANALYZE complete")
-                finally:
-                    vac_conn.close()
-            except Exception as exc:
-                logger.warning("Post-cleanup VACUUM ANALYZE failed (non-fatal): %s", exc)
+                    vac_conn = psycopg2.connect(**self.conn_params)
+                    try:
+                        vac_conn.autocommit = True
+                        with vac_conn.cursor() as cur:
+                            cur.execute("VACUUM ANALYZE logs")
+                        logger.info("Post-cleanup VACUUM ANALYZE complete")
+                    finally:
+                        vac_conn.close()
+                except Exception as exc:
+                    logger.warning("Post-cleanup VACUUM ANALYZE failed (non-fatal): %s", exc)
+            else:
+                logger.debug(
+                    "Post-cleanup VACUUM skipped (deleted=%d < threshold=%d); "
+                    "autovacuum will handle remaining dead tuples",
+                    result['deleted_so_far'], self.VACUUM_MIN_DELETED,
+                )
         return result
 
     def get_stats(self) -> dict:
