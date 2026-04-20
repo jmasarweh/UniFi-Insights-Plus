@@ -692,12 +692,8 @@ def get_retention():
         dns = 10
         dns_source = 'default'
 
-    # Estimate log counts for slider steps
-    try:
-        estimates = _estimate_log_counts()
-    except Exception as exc:
-        logger.warning("Failed to estimate log counts: %s", exc)
-        estimates = {}
+    # Estimate log counts for slider steps (_estimate_log_counts handles its own errors)
+    estimates = _estimate_log_counts()
 
     return {
         'retention_days': general,

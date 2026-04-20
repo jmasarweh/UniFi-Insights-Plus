@@ -605,7 +605,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
     return () => { if (cleanupPollRef.current) { clearInterval(cleanupPollRef.current); cleanupPollRef.current = null } }
   }, [cleanupRunning])
 
-  useEffect(() => {
+  function loadRetentionConfig() {
     fetchRetentionConfig().then(data => {
       setRetentionFetchError(false)
       setRetention(data)
@@ -615,6 +615,10 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
       console.error('Failed to load retention config:', err)
       setRetentionFetchError(true)
     })
+  }
+
+  useEffect(() => {
+    loadRetentionConfig()
     fetchLogCountsByType().then(setLogCounts).catch(err => console.error('Failed to load log counts:', err))
     fetchUiSettings().then(data => {
       setProcessingSettings({ wifi_processing_enabled: data.wifi_processing_enabled, system_processing_enabled: data.system_processing_enabled })
@@ -915,8 +919,9 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
             </p>
             <div className="flex items-center gap-3">
               {retentionFetchError && (
-                <span className="text-sm text-red-400">
-                  Could not load retention settings — saving is disabled. Check container health.
+                <span role="alert" className="flex items-center gap-2 text-sm text-red-400">
+                  Could not load retention settings — saving is disabled.
+                  <button onClick={loadRetentionConfig} className="underline hover:text-red-300 transition-colors">Retry</button>
                 </span>
               )}
               {!retentionFetchError && retentionMsg && (
