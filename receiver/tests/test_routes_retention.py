@@ -101,7 +101,7 @@ def client(monkeypatch):
 
 class TestRetentionCleanupStart:
     def test_start_cleanup_returns_running(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         # Make run_retention_cleanup block until we release it
         started = threading.Event()
@@ -128,7 +128,7 @@ class TestRetentionCleanupStart:
         started.wait(timeout=2)
 
     def test_start_cleanup_409_when_already_running(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         release = threading.Event()
 
@@ -149,7 +149,7 @@ class TestRetentionCleanupStart:
         release.set()
 
     def test_start_cleanup_400_on_invalid_days(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.Database.validate_retention_days.side_effect = ValueError("must be positive")
 
@@ -160,14 +160,14 @@ class TestRetentionCleanupStart:
 
 class TestRetentionCleanupStatus:
     def test_status_idle_when_no_job(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, _mock_db, _setup_mod = client
 
         resp = test_client.get('/api/config/retention/cleanup-status')
         assert resp.status_code == 200
         assert resp.json()['status'] == 'idle'
 
     def test_status_shows_running_job(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         release = threading.Event()
 
@@ -189,7 +189,7 @@ class TestRetentionCleanupStatus:
         release.set()
 
     def test_status_shows_complete(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         def fast_cleanup(*args, **kwargs):
             return {'status': 'complete', 'dns_deleted': 50, 'non_dns_deleted': 100,
@@ -207,7 +207,7 @@ class TestRetentionCleanupStatus:
         assert data['non_dns_deleted'] == 100
 
     def test_status_shows_partial(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         def partial_cleanup(*args, **kwargs):
             return {'status': 'partial', 'dns_deleted': 25, 'non_dns_deleted': 0,
@@ -223,7 +223,7 @@ class TestRetentionCleanupStatus:
         assert data['error'] == 'db error'
 
     def test_status_shows_failed(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, _mock_db, _setup_mod = client
 
         def failed_cleanup(*args, **kwargs):
             return {'status': 'failed', 'dns_deleted': 0, 'non_dns_deleted': 0,
@@ -240,7 +240,7 @@ class TestRetentionCleanupStatus:
 
 class TestRetentionConfigGet:
     def test_get_includes_retention_time_default(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, _mock_db, _setup_mod = client
         # Fixture default: ('03:00', 'default'). No env dependence — the resolver is mocked.
         resp = test_client.get('/api/config/retention')
         assert resp.status_code == 200
@@ -250,7 +250,7 @@ class TestRetentionConfigGet:
 
     def test_get_returns_saved_retention_time(self, client):
         from types import SimpleNamespace
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
         mock_db.Database.resolve_retention_time.return_value = SimpleNamespace(time='07:30', source='ui')
         resp = test_client.get('/api/config/retention')
         assert resp.status_code == 200
@@ -261,7 +261,7 @@ class TestRetentionConfigGet:
 
 class TestRetentionConfigPost:
     def test_post_saves_valid_retention_time(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
         resp = test_client.post('/api/config/retention', json={'retention_time': '05:17'})
         assert resp.status_code == 200
         # signal_receiver called so the running process re-registers the job
@@ -274,7 +274,7 @@ class TestRetentionConfigPost:
 
     def test_post_canonicalises_retention_time(self, client):
         """Parser zero-pads — '3:5' stored as '03:05'."""
-        test_client, mock_deps, mock_db, _ = client
+        test_client, _mock_deps, mock_db, _ = client
         resp = test_client.post('/api/config/retention', json={'retention_time': '3:5'})
         assert resp.status_code == 200
         saved = [c for c in mock_db.set_config.call_args_list
@@ -326,9 +326,6 @@ class TestRetentionConfigPost:
 
         Writing would silently flip time_source from 'env'/'default' to 'ui',
         permanently pinning the current time against future env overrides.
-        Found by review after the hour→time refactor — the initial no-op check
-        compared against get_config('retention_time') which is None when the
-        time is env/default-sourced, so every days-only save would trip it.
         """
         from types import SimpleNamespace
         test_client, mock_deps, mock_db, _ = client
@@ -336,8 +333,6 @@ class TestRetentionConfigPost:
         # Effective time is '23:17' from env (system_config row absent).
         mock_db.Database.resolve_retention_time.return_value = SimpleNamespace(
             time='23:17', source='env')
-        # get_config('retention_time') returns None — nothing in DB.
-        # (Fixture default already has get_config returning None for all keys.)
 
         resp = test_client.post('/api/config/retention', json={
             'retention_days': 30,           # days-only edit
@@ -353,7 +348,7 @@ class TestRetentionConfigPost:
 
 class TestRetentionTimeImport:
     def test_import_accepts_valid_retention_time(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, _mock_db, _setup_mod = client
         resp = test_client.post('/api/config/import', json={
             'config': {'retention_time': '15:30'}
         })
