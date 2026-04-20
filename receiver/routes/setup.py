@@ -762,6 +762,7 @@ def _run_cleanup_worker(general_days: int, dns_days: int):
     global _cleanup_job
 
     def on_progress(state):
+        """Update the shared cleanup job state with the latest batch progress."""
         with _cleanup_lock:
             if _cleanup_job:
                 _cleanup_job.update(
@@ -858,6 +859,7 @@ _purge_lock = threading.Lock()
 
 
 def _now_ts():
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 

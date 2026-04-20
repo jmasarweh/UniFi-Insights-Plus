@@ -23,6 +23,7 @@ _wan_ip_by_iface_present = False  # True when authoritative wan_ip_by_iface exis
 
 
 def get_wan_ip() -> str:
+    """Return the cached WAN IP set by the enricher at startup."""
     return _wan_ip
 
 

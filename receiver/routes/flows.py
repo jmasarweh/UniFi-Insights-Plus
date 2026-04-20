@@ -187,6 +187,7 @@ def get_flow_graph(
     interface: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
 ):
+    """Return aggregated flow data for the Sankey/IP-pairs visualisation."""
     # Validate dimensions
     dims = [d.strip() for d in dimensions.split(',')]
     if len(dims) != 3 or len(set(dims)) != 3:
@@ -298,6 +299,7 @@ def get_zone_matrix(
     rule_action: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
 ):
+    """Return interface-to-interface traffic matrix for the zone heatmap."""
     time_range, time_from, time_to = validate_time_params(time_range, time_from, time_to)
 
     where, params = build_log_query(
@@ -368,6 +370,7 @@ def get_host_detail(
     rule_action: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
 ):
+    """Return per-IP connection details including top peers, ports, and countries."""
     # Validate IP
     try:
         ipaddress.ip_address(ip)

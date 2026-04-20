@@ -36,6 +36,7 @@ _EPOCH_MIN = datetime.min.replace(tzinfo=timezone.utc)
 class UniFiPermissionError(Exception):
     """Raised when the UniFi Integration API returns 401 (auth failure) or 403 (insufficient permissions)."""
     def __init__(self, message, status_code=403):
+        """Store the HTTP status code alongside the error message."""
         super().__init__(message)
         self.status_code = status_code
 
@@ -50,6 +51,7 @@ class UniFiAPI:
     TIMEOUT = 10  # seconds per request
 
     def __init__(self, db):
+        """Initialise the API client from environment variables or saved DB config."""
         self._db = db
         self._session = None
         self._site_uuid = None
@@ -1223,6 +1225,7 @@ class UniFiAPI:
         self._poll_stop = threading.Event()
 
         def _poll_loop():
+            """Run the poll immediately then repeat on a fixed interval until stopped."""
             # Initial poll immediately
             self.poll()
             while not self._poll_stop.wait(poll_interval):

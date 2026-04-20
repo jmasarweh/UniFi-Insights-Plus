@@ -53,6 +53,7 @@ def get_logs(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
 ):
+    """Return a paginated, filtered list of log entries."""
     time_range, time_from, time_to = validate_time_params(time_range, time_from, time_to)
     where, params = build_log_query(
         log_type, time_range, time_from, time_to,
@@ -68,6 +69,7 @@ def get_logs(
         'protocol', 'service_name', 'direction', 'rule_action', 'rule_name',
         'geo_country', 'threat_score', 'hostname', 'created_at',
     }
+    """Return a paginated, filtered list of logs with device-name enrichment."""
     sort_col = sort if sort in allowed_sorts else 'timestamp'
     sort_dir = 'ASC' if order.lower() == 'asc' else 'DESC'
     offset = (page - 1) * per_page
@@ -384,6 +386,7 @@ def get_log_counts_by_type():
 
 @router.get("/api/logs/{log_id}")
 def get_log(log_id: int):
+    """Fetch a single log entry by ID with full detail and device-name enrichment."""
     wan_ips = get_wan_ips_from_config(enricher_db)
     conn = get_conn()
     try:
@@ -410,6 +413,8 @@ def get_log(log_id: int):
 
 
 class LogBatchRequest(BaseModel):
+    """Request body for the batch log-fetch endpoint."""
+
     ids: list[int] = Field(..., min_length=1, max_length=50)
 
 
@@ -462,6 +467,7 @@ def export_csv_endpoint(
     protocol: Optional[str] = Query(None),
     limit: int = Query(10000, ge=1, le=100000),
 ):
+    """Stream filtered logs as a CSV download (up to 100 000 rows)."""
     time_range, time_from, time_to = validate_time_params(time_range, time_from, time_to)
     where, params = build_log_query(
         log_type, time_range, time_from, time_to,
