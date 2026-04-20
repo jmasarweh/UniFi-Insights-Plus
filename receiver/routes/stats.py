@@ -234,6 +234,7 @@ def _query_traffic_by_action(cur, cutoff, bucket):
 def get_stats(
     time_range: str = Query("24h", description="1h,6h,24h,7d,30d,60d"),
 ):
+    """Return aggregated dashboard stats: counts, top IPs, service breakdown, and trends."""
     cutoff = parse_time_range(time_range)
     if not cutoff:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -564,6 +565,7 @@ def get_ip_pairs(
     interface_out: Optional[str] = Query(None),
     limit: int = Query(25, ge=1, le=100),
 ):
+    """Return top source/destination IP pairs for the connection-pairs table."""
     time_range, time_from, time_to = validate_time_params(time_range, time_from, time_to)
 
     # Pass dst_port and protocol through build_log_query (they use = matching)
@@ -682,6 +684,7 @@ def get_ip_pairs_csv(
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
 
     def generate():
+        """Stream CSV rows from the query result one chunk at a time."""
         conn = get_conn()
         try:
             with conn.cursor() as cur:

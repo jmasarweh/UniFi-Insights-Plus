@@ -373,13 +373,16 @@ def bulk_update_logging_stream(body: dict):
         raise HTTPException(status_code=400, detail="policies list is required")
 
     def _event_stream():
+        """Generate SSE progress and result events for the bulk-patch operation."""
         q = queue.Queue()
 
         def on_progress(completed, total, success, failed, phase='patching'):
+            """Enqueue a progress event for the SSE stream."""
             q.put({'event': 'progress', 'completed': completed, 'total': total,
                     'success': success, 'failed': failed, 'phase': phase})
 
         def run_bulk():
+            """Execute bulk syslog-enable patch in a background thread and signal the queue."""
             try:
                 result = unifi_api.bulk_patch_logging(policies, progress_callback=on_progress)
                 invalidate_fw_cache()

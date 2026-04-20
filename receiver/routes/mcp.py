@@ -47,6 +47,7 @@ _SCOPE_DESCRIPTIONS = {
 
 
 def _as_bool(val: Any) -> bool:
+    """Coerce a value to bool, treating common truthy strings ('true', '1', 'yes') as True."""
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
@@ -55,6 +56,7 @@ def _as_bool(val: Any) -> bool:
 
 
 def _as_int(val: Any, default: int | None = None) -> int | None:
+    """Convert val to int, returning default on None or conversion failure."""
     if val is None:
         return default
     try:
@@ -64,6 +66,7 @@ def _as_int(val: Any, default: int | None = None) -> int | None:
 
 
 def _default_allowed_origins(request: Request) -> list[str]:
+    """Return the request's own scheme+host as the default allowed-origin list."""
     host = request.headers.get('host', '')
     scheme = get_forwarded_proto(request)
     if not host:
@@ -72,6 +75,7 @@ def _default_allowed_origins(request: Request) -> list[str]:
 
 
 def _validate_origin(request: Request) -> None:
+    """Raise 403 if the request Origin is not in the configured allowed list."""
     origin = request.headers.get('origin')
     if not origin:
         return
@@ -83,12 +87,14 @@ def _validate_origin(request: Request) -> None:
 
 
 def _validate_protocol_version(request: Request) -> None:
+    """Raise 400 if the MCP-Protocol-Version header is present but not supported."""
     version = request.headers.get('mcp-protocol-version')
     if version and version not in _SUPPORTED_PROTOCOLS:
         raise HTTPException(status_code=400, detail="Unsupported MCP protocol version")
 
 
 def _get_bearer_token(request: Request) -> str | None:
+    """Extract the Bearer token from the Authorization header, or return None."""
     auth = request.headers.get('authorization') or ''
     if auth.lower().startswith('bearer '):
         return auth[7:].strip()
@@ -121,10 +127,12 @@ def _require_scope(token_info: dict, required: list[str]) -> None:
 
 
 def _audit_enabled() -> bool:
+    """Return True when MCP audit logging is active."""
     return bool(get_config(enricher_db, 'mcp_audit_enabled', False))
 
 
 def _audit_retention_days() -> int:
+    """Return the configured MCP audit log retention in days."""
     val = get_config(enricher_db, 'mcp_audit_retention_days', 10)
     try:
         return max(1, int(val))
@@ -146,6 +154,7 @@ def _sanitize_params(params: dict | None) -> dict:
     if not params:
         return {}
     def _is_sensitive(key: str) -> bool:
+        """Return True when the key name contains a sensitive token (e.g. 'password', 'secret')."""
         kl = key.lower()
         return any(tok in kl for tok in _SENSITIVE_PARAM_KEYS)
     return {k: ('***' if _is_sensitive(k) else v) for k, v in params.items()}
@@ -153,6 +162,7 @@ def _sanitize_params(params: dict | None) -> dict:
 
 def _write_audit(token_info: dict, tool_name: str, scope: str, params: dict | None,
                  success: bool, error: str | None = None) -> None:
+    """Append an audit_log row for an MCP tool call if audit is enabled."""
     # Won't Fix: raw error logged intentionally — audit entries are admin-only
     # and error messages from tool execution are needed for debugging. Params
     # are already sanitized via _sanitize_params; error strings don't contain secrets.
@@ -181,6 +191,7 @@ def _write_audit(token_info: dict, tool_name: str, scope: str, params: dict | No
 
 
 def _tool_result(data: Any) -> dict:
+    """Wrap a successful tool result in the MCP content envelope."""
     payload = json.dumps(data, ensure_ascii=True, indent=2, default=str)
     return {
         "content": [
@@ -190,6 +201,7 @@ def _tool_result(data: Any) -> dict:
 
 
 def _tool_error(message: str) -> dict:
+    """Wrap an error message in the MCP content envelope with isError=True."""
     return {
         "content": [
             {"type": "text", "text": message}
@@ -199,6 +211,7 @@ def _tool_error(message: str) -> dict:
 
 
 def _tools_catalog() -> list[dict]:
+    """Return the full MCP tools/list response (name, description, inputSchema per tool)."""
     return [
         {
             "name": "search_logs",
@@ -430,6 +443,7 @@ _TOOL_SCOPES = {
 
 
 def _tool_search_logs(args: dict) -> dict:
+    """MCP tool: search logs with optional filters and pagination."""
     page = _as_int(args.get('page'), 1)
     per_page = _as_int(args.get('per_page'), 50)
     if per_page is not None and (per_page < 1 or per_page > 200):
@@ -463,6 +477,7 @@ def _tool_search_logs(args: dict) -> dict:
 
 
 def _tool_get_log(args: dict) -> dict:
+    """MCP tool: retrieve a single log entry by ID."""
     log_id = args.get('log_id')
     if log_id is None:
         raise ValueError("log_id is required")
@@ -472,11 +487,13 @@ def _tool_get_log(args: dict) -> dict:
 
 
 def _tool_get_top_threat_ips(args: dict) -> dict:
+    """MCP tool: return the top threat IPs from the stats endpoint."""
     stats = stats_routes.get_stats(time_range=args.get('time_range', '24h'))
     return {'top_threat_ips': stats.get('top_threat_ips', [])}
 
 
 def _tool_list_threat_ips(args: dict) -> dict:
+    """MCP tool: list known threat IPs with optional score/date filters."""
     limit = _as_int(args.get('limit'), 100)
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
@@ -492,6 +509,7 @@ def _tool_list_threat_ips(args: dict) -> dict:
 
 
 def _tool_aggregate_logs(args: dict) -> dict:
+    """MCP tool: aggregate logs by a group-by field with optional filters."""
     return logs_routes.get_logs_aggregate(
         group_by=args.get('group_by', ''),
         prefix_length=_as_int(args.get('prefix_length')),
@@ -522,6 +540,7 @@ def _tool_aggregate_logs(args: dict) -> dict:
 
 
 def _tool_export_logs_csv_url(args: dict) -> dict:
+    """MCP tool: return the CSV export download URL for the given filter args."""
     limit = _as_int(args.get('limit'))
     if limit is not None and (limit < 1 or limit > 100000):
         raise ValueError("limit must be between 1 and 100000")
@@ -531,6 +550,7 @@ def _tool_export_logs_csv_url(args: dict) -> dict:
 
 
 def _tool_set_firewall_syslog(args: dict) -> dict:
+    """MCP tool: enable or disable syslog logging on a list of firewall policies."""
     policies = args.get('policies') or []
     if not policies:
         raise ValueError("policies list is required")
@@ -562,6 +582,7 @@ def _tool_set_firewall_syslog(args: dict) -> dict:
 
 
 def _tool_list_unifi_clients(args: dict) -> dict:
+    """MCP tool: list UniFi clients with optional name/IP search."""
     limit = _as_int(args.get('limit'), 200)
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
@@ -604,6 +625,7 @@ if _handler_keys != _scope_keys:
 
 
 def _handle_tool_call(name: str, args: dict) -> dict:
+    """Dispatch a tool call by name and return the result dict."""
     handler = _TOOL_HANDLERS.get(name)
     if not handler:
         raise KeyError(f"Unknown tool: {name}")
@@ -611,6 +633,7 @@ def _handle_tool_call(name: str, args: dict) -> dict:
 
 
 def _jsonrpc_error(code: int, message: str, rpc_id: Any = None) -> dict:
+    """Build a JSON-RPC 2.0 error response dict."""
     return {
         "jsonrpc": "2.0",
         "id": rpc_id,
@@ -622,6 +645,7 @@ def _jsonrpc_error(code: int, message: str, rpc_id: Any = None) -> dict:
 
 
 def _jsonrpc_result(result: Any, rpc_id: Any) -> dict:
+    """Build a JSON-RPC 2.0 success response dict."""
     return {
         "jsonrpc": "2.0",
         "id": rpc_id,
@@ -630,6 +654,7 @@ def _jsonrpc_result(result: Any, rpc_id: Any) -> dict:
 
 
 def _handle_request(payload: dict, token_info: dict | None) -> dict | None:
+    """Route a JSON-RPC 2.0 payload to the correct MCP method handler."""
     if payload.get('jsonrpc') != '2.0':
         return _jsonrpc_error(-32600, "Invalid JSON-RPC version", payload.get('id'))
 
@@ -701,6 +726,7 @@ def _handle_request(payload: dict, token_info: dict | None) -> dict | None:
 
 
 async def _handle_jsonrpc(body: Any, token_info: dict | None) -> Response:
+    """Deserialise the request body, call _handle_request, and return a JSON response."""
     if isinstance(body, list):
         return JSONResponse(_jsonrpc_error(-32600, "Batch requests not supported"), status_code=400)
 
@@ -713,12 +739,14 @@ async def _handle_jsonrpc(body: Any, token_info: dict | None) -> Response:
 
 
 def _require_mcp_enabled():
+    """Raise 404 if the MCP integration is not enabled in config."""
     if not get_config(enricher_db, 'mcp_enabled', False):
         raise HTTPException(status_code=404, detail="MCP not enabled")
 
 
 @router.get("/api/mcp")
 async def mcp_get(request: Request):
+    """MCP SSE transport — keeps a persistent event-stream open for the client."""
     _require_mcp_enabled()
     _validate_origin(request)
     _validate_protocol_version(request)
@@ -729,6 +757,7 @@ async def mcp_get(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     async def _event_stream():
+        """Emit a connected event then send keep-alive pings every 15 s."""
         yield ": connected\n\n"
         while True:
             await asyncio.sleep(15)
@@ -739,6 +768,7 @@ async def mcp_get(request: Request):
 
 @router.post("/api/mcp")
 async def mcp_post(request: Request):
+    """MCP HTTP transport — receive a JSON-RPC request and dispatch to the tool handler."""
     _require_mcp_enabled()
     _validate_origin(request)
     _validate_protocol_version(request)
@@ -760,6 +790,7 @@ async def mcp_post(request: Request):
 
 @router.get("/api/settings/mcp")
 def get_mcp_settings():
+    """Return current MCP server settings (enabled flag, audit config, allowed origins)."""
     return {
         "enabled": get_config(enricher_db, "mcp_enabled", False),
         "audit_enabled": get_config(enricher_db, "mcp_audit_enabled", False),
@@ -770,6 +801,7 @@ def get_mcp_settings():
 
 @router.put("/api/settings/mcp")
 def update_mcp_settings(body: dict):
+    """Update MCP server settings (enabled, audit, retention, allowed origins)."""
     if 'enabled' in body:
         set_config(enricher_db, "mcp_enabled", bool(body['enabled']))
     if 'audit_enabled' in body:
@@ -793,6 +825,7 @@ def update_mcp_settings(body: dict):
 
 @router.get("/api/settings/mcp/scopes")
 def list_mcp_scopes():
+    """List all valid MCP permission scopes with their descriptions."""
     return {
         "scopes": [
             {"id": scope, "description": _SCOPE_DESCRIPTIONS.get(scope, "")}
@@ -803,6 +836,7 @@ def list_mcp_scopes():
 
 @router.get("/api/settings/mcp/audit")
 def list_mcp_audit(limit: int = 200, offset: int = 0):
+    """Return paginated MCP API-call audit log entries."""
     if limit < 1 or limit > 1000:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
     if offset < 0:
