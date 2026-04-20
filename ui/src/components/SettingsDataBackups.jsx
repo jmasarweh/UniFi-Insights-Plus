@@ -504,6 +504,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
   const [dnsRetentionDays, setDnsRetentionDays] = useState(10)
   const [retentionSaving, setRetentionSaving] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
+  const [retentionFetchError, setRetentionFetchError] = useState(false)
   const [showCleanup, setShowCleanup] = useState(false)
   const [cleanupJob, setCleanupJob] = useState(null) // null | { status, deleted_so_far, ... }
   const cleanupPollRef = useRef(null)
@@ -606,10 +607,14 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
 
   useEffect(() => {
     fetchRetentionConfig().then(data => {
+      setRetentionFetchError(false)
       setRetention(data)
       setRetentionDays(data.retention_days)
       setDnsRetentionDays(data.dns_retention_days)
-    }).catch(err => console.error('Failed to load retention config:', err))
+    }).catch(err => {
+      console.error('Failed to load retention config:', err)
+      setRetentionFetchError(true)
+    })
     fetchLogCountsByType().then(setLogCounts).catch(err => console.error('Failed to load log counts:', err))
     fetchUiSettings().then(data => {
       setProcessingSettings({ wifi_processing_enabled: data.wifi_processing_enabled, system_processing_enabled: data.system_processing_enabled })
@@ -909,7 +914,12 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
               {totalLogs != null && <>{totalLogs.toLocaleString()} logs stored · </>}Cleanup runs daily at 03:00 UTC
             </p>
             <div className="flex items-center gap-3">
-              {retentionMsg && (
+              {retentionFetchError && (
+                <span className="text-sm text-red-400">
+                  Could not load retention settings — saving is disabled. Check container health.
+                </span>
+              )}
+              {!retentionFetchError && retentionMsg && (
                 <span className={`text-sm ${retentionMsg.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
                   {retentionMsg.text}
                 </span>
@@ -927,9 +937,9 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
               )}
               <button
                 onClick={saveRetention}
-                disabled={!retentionDirty || retentionSaving}
+                disabled={retentionFetchError || !retentionDirty || retentionSaving}
                 className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                  retentionDirty
+                  !retentionFetchError && retentionDirty
                     ? 'bg-teal-600 text-white hover:bg-teal-500'
                     : 'bg-gray-800 text-gray-500 cursor-not-allowed'
                 }`}

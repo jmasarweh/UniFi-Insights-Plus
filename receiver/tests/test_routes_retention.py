@@ -217,3 +217,43 @@ class TestRetentionCleanupStatus:
         resp, data = _poll_until(test_client, 'failed')
         assert data['status'] == 'failed'
         assert data['error'] == 'connection lost'
+
+
+class TestGetRetentionConfig:
+    def test_returns_defaults_when_no_config(self, client):
+        test_client, mock_deps, mock_db, setup_mod = client
+
+        mock_db.get_config.return_value = None
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['retention_days'] == 60
+        assert data['dns_retention_days'] == 10
+        assert data['general_source'] == 'default'
+        assert data['dns_source'] == 'default'
+
+    def test_returns_db_values_when_set(self, client):
+        test_client, mock_deps, mock_db, setup_mod = client
+
+        def get_config_side_effect(db, key, default=None):
+            return {'retention_days': 7, 'dns_retention_days': 3}.get(key)
+
+        mock_db.get_config.side_effect = get_config_side_effect
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['retention_days'] == 7
+        assert data['dns_retention_days'] == 3
+        assert data['general_source'] == 'ui'
+        assert data['dns_source'] == 'ui'
+
+    def test_returns_500_on_db_failure(self, client):
+        test_client, mock_deps, mock_db, setup_mod = client
+
+        mock_db.get_config.side_effect = Exception("connection refused")
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 500
+        assert 'retention configuration' in resp.json()['detail']

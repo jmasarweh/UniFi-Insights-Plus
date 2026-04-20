@@ -651,8 +651,12 @@ def save_vpn_networks(body: dict):
 @router.get("/api/config/retention")
 def get_retention():
     """Return current retention configuration with effective values and source."""
-    ui_general = get_config(enricher_db, 'retention_days')
-    ui_dns = get_config(enricher_db, 'dns_retention_days')
+    try:
+        ui_general = get_config(enricher_db, 'retention_days')
+        ui_dns = get_config(enricher_db, 'dns_retention_days')
+    except Exception as exc:
+        logger.error("Failed to read retention config from DB: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to read retention configuration") from exc
 
     env_general = os.environ.get('RETENTION_DAYS')
     env_dns = os.environ.get('DNS_RETENTION_DAYS')
@@ -689,7 +693,11 @@ def get_retention():
         dns_source = 'default'
 
     # Estimate log counts for slider steps
-    estimates = _estimate_log_counts()
+    try:
+        estimates = _estimate_log_counts()
+    except Exception as exc:
+        logger.warning("Failed to estimate log counts: %s", exc)
+        estimates = {}
 
     return {
         'retention_days': general,
