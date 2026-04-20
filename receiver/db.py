@@ -18,7 +18,6 @@ import psycopg2
 import psycopg2.errors
 from psycopg2 import pool, extras
 from psycopg2.extras import Json
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 logger = logging.getLogger(__name__)
 
@@ -1223,13 +1222,18 @@ END $$;""",
         if result['deleted_so_far'] > 0:
             # Run VACUUM ANALYZE after bulk deletes so dead tuples are reclaimed
             # immediately, not left for autovacuum to find on its next cycle.
-            # VACUUM cannot run inside a transaction — requires autocommit.
+            # VACUUM cannot run inside a transaction — use a dedicated ephemeral
+            # connection (never returned to the pool) so autocommit mode cannot
+            # leak back to other callers.
             try:
-                with self.get_conn() as conn:
-                    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-                    with conn.cursor() as cur:
+                vac_conn = psycopg2.connect(**self.conn_params)
+                try:
+                    vac_conn.autocommit = True
+                    with vac_conn.cursor() as cur:
                         cur.execute("VACUUM ANALYZE logs")
-                logger.info("Post-cleanup VACUUM ANALYZE complete")
+                    logger.info("Post-cleanup VACUUM ANALYZE complete")
+                finally:
+                    vac_conn.close()
             except Exception as exc:
                 logger.warning("Post-cleanup VACUUM ANALYZE failed (non-fatal): %s", exc)
         return result
