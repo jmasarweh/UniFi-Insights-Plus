@@ -85,7 +85,7 @@ class TestRetentionCleanupStart:
 
     def test_start_cleanup_returns_running(self, client):
         """Starting a cleanup returns 200 with status='running'."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         # Make run_retention_cleanup block until we release it
         started = threading.Event()
@@ -114,7 +114,7 @@ class TestRetentionCleanupStart:
 
     def test_start_cleanup_409_when_already_running(self, client):
         """A second POST while a cleanup is running returns 409."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         release = threading.Event()
 
@@ -137,7 +137,7 @@ class TestRetentionCleanupStart:
 
     def test_start_cleanup_400_on_invalid_days(self, client):
         """Invalid retention days raise 400 before the job is started."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.Database.validate_retention_days.side_effect = ValueError("must be positive")
 
@@ -151,7 +151,7 @@ class TestRetentionCleanupStatus:
 
     def test_status_idle_when_no_job(self, client):
         """Status is 'idle' when no cleanup has been triggered."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, _mock_db, _setup_mod = client
 
         resp = test_client.get('/api/config/retention/cleanup-status')
         assert resp.status_code == 200
@@ -159,7 +159,7 @@ class TestRetentionCleanupStatus:
 
     def test_status_shows_running_job(self, client):
         """Status endpoint reflects 'running' while a cleanup is in progress."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         release = threading.Event()
 
@@ -183,7 +183,7 @@ class TestRetentionCleanupStatus:
 
     def test_status_shows_complete(self, client):
         """Status transitions to 'complete' with correct row counts after a successful run."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def fast_cleanup(*args, **kwargs):
             """Return a complete result immediately."""
@@ -203,7 +203,7 @@ class TestRetentionCleanupStatus:
 
     def test_status_shows_partial(self, client):
         """Status shows 'partial' with an error message when cleanup aborted mid-run."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def partial_cleanup(*args, **kwargs):
             """Return a partial result with an error."""
@@ -221,7 +221,7 @@ class TestRetentionCleanupStatus:
 
     def test_status_shows_failed(self, client):
         """Status shows 'failed' with an error message when cleanup raises an exception."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def failed_cleanup(*args, **kwargs):
             """Return a failed result."""
@@ -242,7 +242,7 @@ class TestGetRetentionConfig:
 
     def test_returns_defaults_when_no_config(self, client):
         """Returns the built-in defaults when no config is saved in the DB."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.get_config.return_value = None
 
@@ -256,7 +256,7 @@ class TestGetRetentionConfig:
 
     def test_returns_db_values_when_set(self, client):
         """Returns the saved DB values and marks source as 'ui'."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         def get_config_side_effect(db, key, default=None):
             """Return saved retention values for known keys."""
@@ -274,7 +274,7 @@ class TestGetRetentionConfig:
 
     def test_returns_500_on_db_failure(self, client):
         """Returns 500 with an informative detail message when the DB call fails."""
-        test_client, mock_deps, mock_db, setup_mod = client
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.get_config.side_effect = Exception("connection refused")
 
