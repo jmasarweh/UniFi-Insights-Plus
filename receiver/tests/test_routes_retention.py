@@ -100,7 +100,10 @@ def client(monkeypatch):
 
 
 class TestRetentionCleanupStart:
+    """Tests for POST /api/config/retention/cleanup."""
+
     def test_start_cleanup_returns_running(self, client):
+        """Starting a cleanup returns 200 with status='running'."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         # Make run_retention_cleanup block until we release it
@@ -108,6 +111,7 @@ class TestRetentionCleanupStart:
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until the release event is set, then return a complete result."""
             started.set()
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
@@ -128,11 +132,13 @@ class TestRetentionCleanupStart:
         started.wait(timeout=2)
 
     def test_start_cleanup_409_when_already_running(self, client):
+        """A second POST while a cleanup is running returns 409."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until released."""
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': None}
@@ -149,6 +155,7 @@ class TestRetentionCleanupStart:
         release.set()
 
     def test_start_cleanup_400_on_invalid_days(self, client):
+        """Invalid retention days raise 400 before the job is started."""
         test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.Database.validate_retention_days.side_effect = ValueError("must be positive")
@@ -159,7 +166,10 @@ class TestRetentionCleanupStart:
 
 
 class TestRetentionCleanupStatus:
+    """Tests for GET /api/config/retention/cleanup-status."""
+
     def test_status_idle_when_no_job(self, client):
+        """Status is 'idle' when no cleanup has been triggered."""
         test_client, _mock_deps, _mock_db, _setup_mod = client
 
         resp = test_client.get('/api/config/retention/cleanup-status')
@@ -167,11 +177,13 @@ class TestRetentionCleanupStatus:
         assert resp.json()['status'] == 'idle'
 
     def test_status_shows_running_job(self, client):
+        """Status endpoint reflects 'running' while a cleanup is in progress."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until released."""
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': None}
@@ -189,9 +201,11 @@ class TestRetentionCleanupStatus:
         release.set()
 
     def test_status_shows_complete(self, client):
+        """Status transitions to 'complete' with correct row counts after a successful run."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         def fast_cleanup(*args, **kwargs):
+            """Return a complete result immediately."""
             return {'status': 'complete', 'dns_deleted': 50, 'non_dns_deleted': 100,
                     'deleted_so_far': 150, 'batches_completed': 2, 'error': None}
 
@@ -207,9 +221,11 @@ class TestRetentionCleanupStatus:
         assert data['non_dns_deleted'] == 100
 
     def test_status_shows_partial(self, client):
+        """Status shows 'partial' with an error message when cleanup aborted mid-run."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         def partial_cleanup(*args, **kwargs):
+            """Return a partial result with an error."""
             return {'status': 'partial', 'dns_deleted': 25, 'non_dns_deleted': 0,
                     'deleted_so_far': 25, 'batches_completed': 1, 'error': 'db error'}
 
@@ -223,9 +239,11 @@ class TestRetentionCleanupStatus:
         assert data['error'] == 'db error'
 
     def test_status_shows_failed(self, client):
+        """Status shows 'failed' with an error message when cleanup raises an exception."""
         test_client, mock_deps, _mock_db, _setup_mod = client
 
         def failed_cleanup(*args, **kwargs):
+            """Return a failed result."""
             return {'status': 'failed', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': 'connection lost'}
 
@@ -239,7 +257,10 @@ class TestRetentionCleanupStatus:
 
 
 class TestRetentionConfigGet:
+    """Tests for GET /api/config/retention."""
+
     def test_get_includes_retention_time_default(self, client):
+        """GET returns default retention_time ('03:00') and time_source='default'."""
         test_client, _mock_deps, _mock_db, _setup_mod = client
         # Fixture default: ('03:00', 'default'). No env dependence — the resolver is mocked.
         resp = test_client.get('/api/config/retention')
