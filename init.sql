@@ -116,8 +116,17 @@ CREATE INDEX IF NOT EXISTS idx_logs_nondns_timestamp
 ALTER TABLE logs SET (
     autovacuum_vacuum_scale_factor  = 0.01,
     autovacuum_vacuum_cost_delay    = 2,
-    autovacuum_analyze_scale_factor = 0.02
+    autovacuum_analyze_scale_factor = 0.02,
+    -- Higher I/O budget per autovacuum worker: lets it process more pages per
+    -- delay cycle and keep pace with high-ingestion dead-tuple accumulation.
+    autovacuum_vacuum_cost_limit    = 10000
 );
+
+-- Log every autovacuum operation on this database for production observability.
+-- Lets operators verify the scale_factor tuning is firing as expected after
+-- large cleanups.  Set log_autovacuum_min_duration = 60000 to restrict logging
+-- to operations taking > 60 s if the default produces too much volume.
+ALTER DATABASE "unifi_logs" SET log_autovacuum_min_duration = '0';
 
 -- AbuseIPDB threat score cache (persistent across restarts)
 CREATE TABLE IF NOT EXISTS ip_threats (
