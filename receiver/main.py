@@ -29,6 +29,11 @@ from unifi_api import UniFiAPI
 from pihole_api import PiHolePoller
 from routes.auth import auth_cleanup
 
+# Set by the SIGUSR2 handler when retention_hour may have changed.
+# Consumed by the scheduler loop (single-writer, single-reader — safe).
+# All `schedule` registry mutation stays on the scheduler thread.
+_retention_reload_requested = threading.Event()
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 SYSLOG_PORT = 514
@@ -36,7 +41,6 @@ SYSLOG_BUFFER_SIZE = 8192      # Max UDP packet size
 BATCH_SIZE = 50                 # Insert logs in batches
 BATCH_TIMEOUT = 2.0             # Flush batch after N seconds even if not full
 STATS_INTERVAL_MINUTES = 15     # Log stats every N minutes
-RETENTION_HOUR = "03:00"        # Run retention cleanup daily at this time
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
@@ -253,6 +257,52 @@ def _refresh_network_identity_from_logs(db: Database):
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
+def _retention_cleanup(db: Database):
+    """Run a full retention cleanup pass. Called by the schedule library."""
+    try:
+        cfg = Database.resolve_retention_days(db)
+        result = db.run_retention_cleanup(cfg.general, cfg.dns)
+        if result['status'] == 'partial':
+            logger.warning("Retention cleanup partial: %d deleted, error: %s",
+                           result['deleted_so_far'], result['error'])
+        elif result['status'] == 'failed':
+            logger.error("Retention cleanup failed: %s", result['error'])
+    except Exception as e:
+        logger.error("Retention cleanup failed: %s", e)
+
+
+def _register_retention_job(db: Database):
+    """(Re-)register the daily retention cleanup with the saved hour.
+
+    MUST only be called on the scheduler thread — mutates the `schedule`
+    module's job registry, which is not thread-safe.
+
+    Tagged 'retention' so we can clear and re-register without touching the
+    other scheduled jobs (stats, blacklist, auth cleanup, wan refresh).
+    """
+    schedule.clear('retention')
+    cfg = Database.resolve_retention_hour(db)
+    (schedule.every()
+             .day
+             .at(f"{cfg.hour:02d}:00")
+             .do(_retention_cleanup, db=db)
+             .tag('retention'))
+    logger.info("Retention cleanup scheduled daily at %02d:00 (source=%s, container-local time)",
+                cfg.hour, cfg.source)
+
+
+def _scheduler_tick(db: Database):
+    """One iteration of the scheduler loop — extracted so tests can run it
+    deterministically. Observes the retention-reload Event (set by the signal
+    handler on another thread) and rebuilds the job before dispatching pending
+    runs. All `schedule` registry mutation therefore stays on this thread.
+    """
+    if _retention_reload_requested.is_set():
+        _retention_reload_requested.clear()
+        _register_retention_job(db)
+    schedule.run_pending()
+
+
 def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: BlacklistFetcher = None):
     """Background thread for scheduled tasks (retention cleanup, stats, blacklist)."""
 
@@ -264,21 +314,6 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
             logger.debug("Enrichment stats — %s", enrich_stats)
         except Exception as e:
             logger.error("Failed to get stats: %s", e)
-
-    def retention_cleanup():
-        try:
-            cfg = Database.resolve_retention_days(db)
-            result = db.run_retention_cleanup(cfg.general, cfg.dns)
-            if result['status'] == 'partial':
-                logger.warning("Retention cleanup partial: %d deleted, error: %s",
-                               result['deleted_so_far'], result['error'])
-            elif result['status'] == 'failed':
-                logger.error("Retention cleanup failed: %s", result['error'])
-        except Exception as e:
-            logger.error("Retention cleanup failed: %s", e)
-
-        # Note: audit_log cleanup is handled by auth_cleanup() at 03:30.
-        # Legacy mcp_audit table no longer exists after migration to audit_log.
 
     def pull_blacklist():
         if blacklist_fetcher:
@@ -292,20 +327,20 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
 
     schedule.every(STATS_INTERVAL_MINUTES).minutes.do(log_stats)
     schedule.every(STATS_INTERVAL_MINUTES).minutes.do(refresh_wan_ip)
-    schedule.every().day.at(RETENTION_HOUR).do(retention_cleanup)
+    _register_retention_job(db)
     schedule.every().day.at("04:00").do(pull_blacklist)
     # auth_cleanup has its own internal try/except — no wrapper needed here.
     schedule.every().day.at("03:30").do(auth_cleanup)
 
-    logger.info("Scheduler started — stats every %dm, retention daily at %s, blacklist daily at 04:00, auth cleanup daily at 03:30",
-                 STATS_INTERVAL_MINUTES, RETENTION_HOUR)
+    logger.info("Scheduler started — stats every %dm, blacklist daily at 04:00, auth cleanup daily at 03:30",
+                 STATS_INTERVAL_MINUTES)
 
     # Initial blacklist pull after 30s startup delay
     time.sleep(30)
     pull_blacklist()
 
     while True:
-        schedule.run_pending()
+        _scheduler_tick(db)
         time.sleep(10)
 
 
@@ -403,6 +438,8 @@ def main():
         pihole.reload_config()
         enricher.reload_config()
         receiver._load_disabled_types()
+        # scheduler thread will rebuild the retention job on its next tick
+        _retention_reload_requested.set()
 
         # Write timestamp to confirm reload completed
         try:
