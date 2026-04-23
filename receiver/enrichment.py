@@ -91,6 +91,7 @@ class TTLCache:
         prune_trigger_ratio: float = 1.10,
         prune_target_ratio: float = 0.90,
     ):
+        """Initialise the cache with TTL and optional LRU watermark bounds."""
         self.ttl = ttl_seconds
         self.max_entries = max_entries
         self._cache = OrderedDict()
@@ -111,9 +112,11 @@ class TTLCache:
             self._prune_target_count = None
 
     def _is_expired(self, entry_time: float, now: float) -> bool:
+        """Return True when the entry has exceeded its TTL."""
         return now - entry_time >= self.ttl
 
     def _prune_expired_locked(self, now: float):
+        """Remove all expired entries from the cache (caller must hold the lock)."""
         expired_keys = [
             key for key, entry in self._cache.items()
             if self._is_expired(entry['time'], now)
@@ -122,10 +125,12 @@ class TTLCache:
             self._cache.pop(key, None)
 
     def _evict_overflow_locked(self):
+        """Evict the oldest entries until the cache is within its size limit (caller must hold the lock)."""
         while len(self._cache) > self._prune_target_count:
             self._cache.popitem(last=False)
 
     def get(self, key: str) -> Optional[dict]:
+        """Return the cached value for key, or None if missing or expired."""
         with self._lock:
             entry = self._cache.get(key)
             if entry and not self._is_expired(entry['time'], time.time()):
@@ -136,6 +141,7 @@ class TTLCache:
             return None
 
     def set(self, key: str, value: dict):
+        """Store value under key, evicting stale/overflow entries as needed."""
         with self._lock:
             now = time.time()
             self._cache[key] = {'value': value, 'time': now}
@@ -147,10 +153,12 @@ class TTLCache:
                     self._evict_overflow_locked()
 
     def size(self) -> int:
+        """Return the number of entries currently held (including not-yet-expired)."""
         with self._lock:
             return len(self._cache)
 
     def delete(self, key: str):
+        """Remove key from the cache if present."""
         with self._lock:
             self._cache.pop(key, None)
 
@@ -161,12 +169,14 @@ class GeoIPEnricher:
     """MaxMind GeoLite2 lookups for City and ASN."""
 
     def __init__(self, db_dir: str = '/app/maxmind'):
+        """Open GeoLite2 City and ASN mmdb files from db_dir."""
         self.city_reader = None
         self.asn_reader = None
         self.db_dir = db_dir
         self._load_databases(db_dir)
 
     def _load_databases(self, db_dir: str):
+        """Open MaxMind city and ASN readers from db_dir, logging warnings for missing files."""
         try:
             import geoip2.database
             city_path = os.path.join(db_dir, 'GeoLite2-City.mmdb')
@@ -230,6 +240,7 @@ class GeoIPEnricher:
         return result
 
     def close(self):
+        """Close the open mmdb file handles."""
         if self.city_reader:
             self.city_reader.close()
         if self.asn_reader:
@@ -246,6 +257,7 @@ class AbuseIPDBEnricher:
     MEMORY_CACHE_MAX_ENTRIES = 5000
 
     def __init__(self, api_key: str = None, db=None):
+        """Initialise with an optional API key; if omitted reads ABUSEIPDB_API_KEY from env."""
         self.api_key = api_key if api_key is not None else os.environ.get('ABUSEIPDB_API_KEY', '')
         self.cache = TTLCache(
             ttl_seconds=DEFAULT_TTL_SECONDS,
@@ -571,6 +583,7 @@ class RDNSEnricher:
     MEMORY_CACHE_MAX_ENTRIES = 20000
 
     def __init__(self, timeout: float = 2.0):
+        """Initialise with a per-lookup DNS timeout in seconds."""
         self.timeout = timeout
         self.cache = TTLCache(
             ttl_seconds=DEFAULT_TTL_SECONDS,
@@ -605,6 +618,7 @@ class Enricher:
     _COALESCE_MAP_MAX_SIZE = 256
 
     def __init__(self, db=None, unifi=None):
+        """Wire up GeoIP, AbuseIPDB, and rDNS enrichers; pre-load WAN exclusions from DB."""
         self.geoip = GeoIPEnricher()
         self.abuseipdb = AbuseIPDBEnricher(db=db)
         self.rdns = RDNSEnricher()
@@ -807,6 +821,7 @@ class Enricher:
         }
 
     def close(self):
+        """Release GeoIP file handles."""
         self.geoip.close()
 
     def reload_config(self):

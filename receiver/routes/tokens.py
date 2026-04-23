@@ -39,6 +39,7 @@ def _format_token_timestamps(item: dict) -> dict:
 
 
 def hash_token(token: str, salt: str) -> str:
+    """Return HMAC-SHA256 hex digest of token keyed by salt."""
     return hmac.new(salt.encode(), token.encode(), 'sha256').hexdigest()
 
 
