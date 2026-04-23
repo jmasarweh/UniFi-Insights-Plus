@@ -69,7 +69,6 @@ def get_logs(
         'protocol', 'service_name', 'direction', 'rule_action', 'rule_name',
         'geo_country', 'threat_score', 'hostname', 'created_at',
     }
-    """Return a paginated, filtered list of logs with device-name enrichment."""
     sort_col = sort if sort in allowed_sorts else 'timestamp'
     sort_dir = 'ASC' if order.lower() == 'asc' else 'DESC'
     offset = (page - 1) * per_page
