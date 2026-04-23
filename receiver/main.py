@@ -36,7 +36,7 @@ SYSLOG_BUFFER_SIZE = 8192      # Max UDP packet size
 BATCH_SIZE = 50                 # Insert logs in batches
 BATCH_TIMEOUT = 2.0             # Flush batch after N seconds even if not full
 STATS_INTERVAL_MINUTES = 15     # Log stats every N minutes
-RETENTION_HOUR = "03:00"        # Run retention cleanup daily at this time
+RETENTION_INTERVAL_HOURS = 12   # Run retention cleanup every N hours
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,7 @@ class SyslogReceiver:
     HEARTBEAT_INTERVAL = 60  # Log heartbeat every 60 seconds
 
     def __init__(self, db: Database, enricher: Enricher):
+        """Create the receiver — does not open the socket until start() is called."""
         self.db = db
         self.enricher = enricher
         self.sock = None
@@ -257,6 +258,7 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
     """Background thread for scheduled tasks (retention cleanup, stats, blacklist)."""
 
     def log_stats():
+        """Log current DB and enrichment statistics at DEBUG level."""
         try:
             db_stats = db.get_stats()
             enrich_stats = enricher.get_stats()
@@ -266,6 +268,7 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
             logger.error("Failed to get stats: %s", e)
 
     def retention_cleanup():
+        """Delete logs older than the configured retention window."""
         try:
             general, dns = db.resolve_retention_days()
             result = db.run_retention_cleanup(general, dns)
@@ -281,6 +284,7 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
         # Legacy mcp_audit table no longer exists after migration to audit_log.
 
     def pull_blacklist():
+        """Fetch the latest IP blacklist and store it in the database."""
         if blacklist_fetcher:
             try:
                 blacklist_fetcher.fetch_and_store()
@@ -288,17 +292,18 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
                 logger.error("Blacklist pull failed: %s", e)
 
     def refresh_wan_ip():
+        """Refresh WAN/gateway identity from recent log data (no-op when UniFi is active)."""
         _refresh_network_identity_from_logs(db)
 
     schedule.every(STATS_INTERVAL_MINUTES).minutes.do(log_stats)
     schedule.every(STATS_INTERVAL_MINUTES).minutes.do(refresh_wan_ip)
-    schedule.every().day.at(RETENTION_HOUR).do(retention_cleanup)
+    schedule.every(RETENTION_INTERVAL_HOURS).hours.do(retention_cleanup)
     schedule.every().day.at("04:00").do(pull_blacklist)
     # auth_cleanup has its own internal try/except — no wrapper needed here.
     schedule.every().day.at("03:30").do(auth_cleanup)
 
-    logger.info("Scheduler started — stats every %dm, retention daily at %s, blacklist daily at 04:00, auth cleanup daily at 03:30",
-                 STATS_INTERVAL_MINUTES, RETENTION_HOUR)
+    logger.info("Scheduler started — stats every %dm, retention every %dh, blacklist daily at 04:00, auth cleanup daily at 03:30",
+                 STATS_INTERVAL_MINUTES, RETENTION_INTERVAL_HOURS)
 
     # Initial blacklist pull after 30s startup delay
     time.sleep(30)
@@ -312,6 +317,7 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Entrypoint: initialise the database, enricher, and syslog receiver."""
     # Build connection params from environment
     conn_params = build_conn_params()
     logger.info("Database: %s mode (host=%s:%s, db=%s)",
@@ -381,6 +387,7 @@ def main():
 
     # Handle graceful shutdown
     def shutdown(signum, frame):
+        """Handle SIGTERM/SIGINT: flush pending logs and exit cleanly."""
         logger.info("Received signal %d, shutting down...", signum)
         receiver.stop()
         unifi_api.stop_polling()
@@ -391,6 +398,7 @@ def main():
 
     # Handle GeoIP database reload
     def reload_geoip(signum, frame):
+        """Handle SIGUSR1: hot-reload GeoIP databases without restarting."""
         logger.info("Received SIGUSR1, reloading GeoIP databases...")
         enricher.reload_geoip()
 

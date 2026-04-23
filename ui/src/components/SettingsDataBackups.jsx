@@ -915,7 +915,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
           <div className="border-t border-gray-800" />
           <div className="px-5 py-3 flex items-center justify-between">
             <p className="text-sm text-gray-500">
-              {totalLogs != null && <>{totalLogs.toLocaleString()} logs stored · </>}Cleanup runs daily at 03:00 UTC
+              {totalLogs != null && <>{totalLogs.toLocaleString()} logs stored · </>}Cleanup runs every 12 hours
             </p>
             <div className="flex items-center gap-3">
               {retentionFetchError && (
