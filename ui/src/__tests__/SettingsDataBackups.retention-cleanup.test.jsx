@@ -16,7 +16,7 @@ const mockFetchLogCountsByType = vi.fn()
 
 vi.mock('../api', () => ({
   fetchRetentionConfig: vi.fn(() => Promise.resolve({
-    retention_days: 60, dns_retention_days: 10, retention_hour: 3,
+    retention_days: 60, dns_retention_days: 10, retention_time: '03:00',
   })),
   updateRetentionConfig: vi.fn(() => Promise.resolve({ success: true })),
   runRetentionCleanup: vi.fn(() => Promise.resolve({ success: true, status: 'running' })),

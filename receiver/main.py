@@ -29,7 +29,7 @@ from unifi_api import UniFiAPI
 from pihole_api import PiHolePoller
 from routes.auth import auth_cleanup
 
-# Set by the SIGUSR2 handler when retention_hour may have changed.
+# Set by the SIGUSR2 handler when retention_time may have changed.
 # Consumed by the scheduler loop (single-writer, single-reader — safe).
 # All `schedule` registry mutation stays on the scheduler thread.
 _retention_reload_requested = threading.Event()
@@ -274,7 +274,7 @@ def _retention_cleanup(db: Database):
 
 
 def _register_retention_job(db: Database):
-    """(Re-)register the daily retention cleanup with the saved hour.
+    """(Re-)register the daily retention cleanup with the saved time.
 
     MUST only be called on the scheduler thread — mutates the `schedule`
     module's job registry, which is not thread-safe.
@@ -283,14 +283,14 @@ def _register_retention_job(db: Database):
     other scheduled jobs (stats, blacklist, auth cleanup, wan refresh).
     """
     schedule.clear('retention')
-    cfg = Database.resolve_retention_hour(db)
+    cfg = Database.resolve_retention_time(db)
     (schedule.every()
              .day
-             .at(f"{cfg.hour:02d}:00")
+             .at(cfg.time)   # 'HH:MM' — schedule library's native format
              .do(_retention_cleanup, db=db)
              .tag('retention'))
-    logger.info("Retention cleanup scheduled daily at %02d:00 (source=%s, container-local time)",
-                cfg.hour, cfg.source)
+    logger.info("Retention cleanup scheduled daily at %s (source=%s, container-local time)",
+                cfg.time, cfg.source)
 
 
 def _scheduler_tick(db: Database):

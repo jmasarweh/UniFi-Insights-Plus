@@ -156,24 +156,38 @@ INSERT_SQL = f"""
 
 # ── Retention configuration — parsers and result types ───────────────────────
 
-def parse_retention_hour(raw) -> int | None:
-    """Parse and range-validate a retention_hour input value.
+def parse_retention_time(raw) -> str | None:
+    """Parse and range-validate a retention_time input value.
 
-    Returns int in 0..23 or None for any non-coercible / out-of-range input.
-    Shared by Database.resolve_retention_hour (for UI/env values) and the
+    Returns a canonical 'HH:MM' string in the 00:00..23:59 range, or None for
+    any non-coercible / out-of-range input. Accepts strings like '23:17',
+    '3:5', '03:05' — the return value is always zero-padded two-digit form.
+
+    Shared by Database.resolve_retention_time (for UI/env values) and the
     route handlers in routes/setup.py (for POST bodies and import payloads).
     Callers decide how to surface None — resolver falls through to the next
     precedence level, POST raises HTTPException, import pushes to failed_keys.
+
+    The return value is directly consumable by `schedule.every().day.at(...)`
+    so there's no format conversion needed in the scheduler.
     """
-    try:
-        hour = int(raw)
-    except (ValueError, TypeError):
+    if not isinstance(raw, str):
         return None
-    return hour if 0 <= hour <= 23 else None
+    parts = raw.strip().split(':')
+    if len(parts) != 2:
+        return None
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
 
 
-class RetentionHourConfig(NamedTuple):
-    hour: int
+class RetentionTimeConfig(NamedTuple):
+    time: str    # 'HH:MM', 00:00..23:59
     source: str  # 'ui' | 'env' | 'default'
 
 
@@ -1071,26 +1085,26 @@ END $$;""",
         return RetentionDaysConfig(general, general_source, dns, dns_source)
 
     @staticmethod
-    def resolve_retention_hour(db) -> RetentionHourConfig:
-        """Resolve retention cleanup hour from config > env > default.
+    def resolve_retention_time(db) -> RetentionTimeConfig:
+        """Resolve retention cleanup time (HH:MM) from config > env > default.
 
         An invalid `system_config` value does NOT short-circuit to default —
-        env is still consulted. Uses the shared `parse_retention_hour` helper
-        so the int-and-range logic lives in exactly one place.
+        env is still consulted. Uses the shared `parse_retention_time` helper
+        so the parse-and-range logic lives in exactly one place.
 
         Made a staticmethod (not instance method) because signal-handler code
         in main.py calls it with an arbitrary Database reference and a pure
         function is easier to test.
         """
-        ui = parse_retention_hour(db.get_config('retention_hour'))
+        ui = parse_retention_time(db.get_config('retention_time'))
         if ui is not None:
-            return RetentionHourConfig(ui, 'ui')
+            return RetentionTimeConfig(ui, 'ui')
 
-        env = parse_retention_hour(os.environ.get('RETENTION_HOUR'))
+        env = parse_retention_time(os.environ.get('RETENTION_TIME'))
         if env is not None:
-            return RetentionHourConfig(env, 'env')
+            return RetentionTimeConfig(env, 'env')
 
-        return RetentionHourConfig(3, 'default')
+        return RetentionTimeConfig('03:00', 'default')
 
     def run_retention_cleanup(self, general_days: int = 60, dns_days: int = 10,
                               progress_cb=None) -> dict:

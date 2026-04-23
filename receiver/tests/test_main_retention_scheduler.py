@@ -11,9 +11,9 @@ import pytest
 import schedule
 
 
-def _hour_cfg(hour, source='ui'):
-    """Shape-compatible stand-in for RetentionHourConfig — same .hour/.source access."""
-    return SimpleNamespace(hour=hour, source=source)
+def _time_cfg(time, source='ui'):
+    """Shape-compatible stand-in for RetentionTimeConfig — same .time/.source access."""
+    return SimpleNamespace(time=time, source=source)
 
 
 @pytest.fixture(autouse=True)
@@ -41,19 +41,20 @@ def main_module(monkeypatch):
 
 def test_register_retention_job_creates_tagged_job(main_module):
     db = MagicMock()
-    main_module.Database.resolve_retention_hour = MagicMock(return_value=_hour_cfg(5, 'ui'))
+    main_module.Database.resolve_retention_time = MagicMock(return_value=_time_cfg('05:17', 'ui'))
 
     main_module._register_retention_job(db)
 
     tagged = list(schedule.get_jobs('retention'))
     assert len(tagged) == 1
     assert tagged[0].at_time.hour == 5
-    assert tagged[0].at_time.minute == 0
+    assert tagged[0].at_time.minute == 17  # minute precision preserved
 
 
 def test_register_retention_job_replaces_existing(main_module):
     db = MagicMock()
-    main_module.Database.resolve_retention_hour = MagicMock(side_effect=[_hour_cfg(3, 'default'), _hour_cfg(18, 'ui')])
+    main_module.Database.resolve_retention_time = MagicMock(
+        side_effect=[_time_cfg('03:00', 'default'), _time_cfg('18:45', 'ui')])
 
     main_module._register_retention_job(db)
     assert list(schedule.get_jobs('retention'))[0].at_time.hour == 3
@@ -62,11 +63,12 @@ def test_register_retention_job_replaces_existing(main_module):
     tagged = list(schedule.get_jobs('retention'))
     assert len(tagged) == 1, 'expected exactly one retention job after re-registration'
     assert tagged[0].at_time.hour == 18
+    assert tagged[0].at_time.minute == 45
 
 
 def test_register_retention_job_does_not_clear_other_tags(main_module):
     db = MagicMock()
-    main_module.Database.resolve_retention_hour = MagicMock(return_value=_hour_cfg(3, 'default'))
+    main_module.Database.resolve_retention_time = MagicMock(return_value=_time_cfg('03:00', 'default'))
 
     # Pre-existing unrelated tagged job
     schedule.every().day.at('04:00').do(lambda: None).tag('blacklist')
@@ -87,8 +89,9 @@ def test_scheduler_tick_rebuilds_job_when_event_set(main_module):
     _scheduler_tick on the scheduler thread to rebuild the retention job.
     """
     db = MagicMock()
-    # First call: initial registration at hour 3. Second call: rebuild at hour 18.
-    main_module.Database.resolve_retention_hour = MagicMock(side_effect=[_hour_cfg(3, 'default'), _hour_cfg(18, 'ui')])
+    # First call: initial registration at 03:00. Second call: rebuild at 18:45.
+    main_module.Database.resolve_retention_time = MagicMock(
+        side_effect=[_time_cfg('03:00', 'default'), _time_cfg('18:45', 'ui')])
 
     main_module._register_retention_job(db)
     assert list(schedule.get_jobs('retention'))[0].at_time.hour == 3
@@ -102,17 +105,18 @@ def test_scheduler_tick_rebuilds_job_when_event_set(main_module):
     tagged = list(schedule.get_jobs('retention'))
     assert len(tagged) == 1
     assert tagged[0].at_time.hour == 18
+    assert tagged[0].at_time.minute == 45
     assert not main_module._retention_reload_requested.is_set(), \
         'tick must clear the Event so the job is not rebuilt every tick'
 
 
 def test_scheduler_tick_is_noop_when_event_unset(main_module):
-    """Without the Event set, _scheduler_tick must not re-query retention_hour
+    """Without the Event set, _scheduler_tick must not re-query retention_time
     or touch the retention job — only run pending scheduled tasks.
     """
     db = MagicMock()
-    resolver = MagicMock(return_value=_hour_cfg(3, 'default'))
-    main_module.Database.resolve_retention_hour = resolver
+    resolver = MagicMock(return_value=_time_cfg('03:00', 'default'))
+    main_module.Database.resolve_retention_time = resolver
 
     main_module._register_retention_job(db)
     assert resolver.call_count == 1  # from the _register_retention_job call above

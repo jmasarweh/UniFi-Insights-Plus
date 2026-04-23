@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from psycopg2.extras import RealDictCursor, Json
 
-from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_hour
+from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_time
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
 from unifi_api import UniFiAPI
 from firewall_policy_matcher import invalidate_cache as invalidate_fw_cache
@@ -430,7 +430,7 @@ _EXPORTABLE_KEYS = [
     'wizard_path', 'unifi_enabled', 'unifi_host', 'unifi_site',
     'unifi_verify_ssl', 'unifi_poll_interval', 'unifi_features',
     'unifi_controller_name', 'unifi_controller_type',
-    'retention_days', 'dns_retention_days', 'retention_hour',
+    'retention_days', 'dns_retention_days', 'retention_time',
     'mcp_enabled', 'mcp_audit_enabled', 'mcp_audit_retention_days', 'mcp_allowed_origins',
     'auth_session_ttl_hours', 'audit_log_retention_days',
     *_UI_SETTINGS_DEFAULTS.keys(),
@@ -542,8 +542,8 @@ def import_config(body: dict):
             except (ValueError, TypeError):
                 failed_keys.append(key)
                 continue
-        elif key == 'retention_hour':
-            parsed = parse_retention_hour(val)
+        elif key == 'retention_time':
+            parsed = parse_retention_time(val)
             if parsed is None:
                 failed_keys.append(key)
                 continue
@@ -658,15 +658,15 @@ def save_vpn_networks(body: dict):
 def get_retention():
     """Return current retention configuration with effective values and source."""
     days = Database.resolve_retention_days(enricher_db)
-    hour = Database.resolve_retention_hour(enricher_db)
+    time_cfg = Database.resolve_retention_time(enricher_db)
 
     return {
         'retention_days': days.general,
         'dns_retention_days': days.dns,
-        'retention_hour': hour.hour,
+        'retention_time': time_cfg.time,
         'general_source': days.general_source,
         'dns_source': days.dns_source,
-        'hour_source': hour.source,
+        'time_source': time_cfg.source,
     }
 
 
@@ -694,29 +694,29 @@ def update_retention(body: dict):
             raise HTTPException(status_code=400, detail="dns_retention_days must be between 1 and 3650")
         set_config(enricher_db, 'dns_retention_days', dns_days)
 
-    raw_hour = body.get('retention_hour')
-    hour_changed = False
-    if raw_hour is not None:
-        hour = parse_retention_hour(raw_hour)
-        if hour is None:
+    raw_time = body.get('retention_time')
+    time_changed = False
+    if raw_time is not None:
+        parsed_time = parse_retention_time(raw_time)
+        if parsed_time is None:
             raise HTTPException(
                 status_code=400,
-                detail="retention_hour must be an integer between 0 and 23"
+                detail="retention_time must be a 'HH:MM' string in 00:00..23:59"
             )
         # Only signal if the value actually differs from what's stored. The UI
-        # sends retention_hour on every save (it's part of the combined dirty
+        # sends retention_time on every save (it's part of the combined dirty
         # check), so without this comparison a days-only edit would still fire
         # SIGUSR2 and force a scheduler rebuild.
-        existing = get_config(enricher_db, 'retention_hour')
-        if existing != hour:
-            set_config(enricher_db, 'retention_hour', hour)
-            hour_changed = True
+        existing = get_config(enricher_db, 'retention_time')
+        if existing != parsed_time:
+            set_config(enricher_db, 'retention_time', parsed_time)
+            time_changed = True
 
-    # Only signal the receiver when the *hour* actually changes — days are
+    # Only signal the receiver when the *time* actually changes — days are
     # re-resolved from the DB on every scheduled run, so they don't need a
     # reload. Scheduler rebuild is an OS-level signal + SIGUSR2 handler chain,
     # so avoiding no-op reloads keeps the system quiet.
-    if hour_changed:
+    if time_changed:
         signal_receiver()
 
     return {"success": True}

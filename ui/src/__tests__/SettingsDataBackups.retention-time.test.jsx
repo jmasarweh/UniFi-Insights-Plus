@@ -1,7 +1,9 @@
 /**
- * Component tests for the cleanup-hour selector in SettingsDataBackups.
+ * Component tests for the cleanup-time input in SettingsDataBackups.
  * Covers: initial render matches saved value, dirty detection, save payload,
- * and footer reflects the saved (not pending) hour.
+ * and footer reflects the saved (not pending) time. Minute-precision paths
+ * (e.g. 23:17) are explicitly asserted — the ability to pick non-hour-boundary
+ * times is the whole reason this input is a time picker, not an hour select.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -11,7 +13,7 @@ const mockUpdateRetentionConfig = vi.fn(() => Promise.resolve({ success: true })
 
 vi.mock('../api', () => ({
   fetchRetentionConfig: vi.fn(() => Promise.resolve({
-    retention_days: 60, dns_retention_days: 10, retention_hour: 15,
+    retention_days: 60, dns_retention_days: 10, retention_time: '15:30',
   })),
   updateRetentionConfig: (...args) => mockUpdateRetentionConfig(...args),
   runRetentionCleanup: vi.fn(() => Promise.resolve({ success: true, status: 'running' })),
@@ -42,39 +44,37 @@ beforeEach(() => {
   mockUpdateRetentionConfig.mockResolvedValue({ success: true })
 })
 
-describe('retention hour selector', () => {
-  it('selects the saved hour after initial load', async () => {
+describe('retention time input', () => {
+  it('shows the saved time after initial load', async () => {
     render(<SettingsDataBackups totalLogs={0} storage={null} />)
-    const select = await screen.findByLabelText(/cleanup hour/i)
-    expect(select.value).toBe('15')
+    const input = await screen.findByLabelText(/cleanup time/i)
+    expect(input.value).toBe('15:30')
   })
 
-  it('footer reflects the saved hour, not the pending one', async () => {
+  it('footer reflects the saved time, not the pending one', async () => {
     render(<SettingsDataBackups totalLogs={0} storage={null} />)
-    await screen.findByLabelText(/cleanup hour/i)
-    // Initial footer matches the server value.
-    expect(screen.getByText(/Cleanup runs daily at 15:00/)).toBeInTheDocument()
+    await screen.findByLabelText(/cleanup time/i)
+    expect(screen.getByText(/Cleanup runs daily at 15:30/)).toBeInTheDocument()
 
-    // Change the selector without saving — footer must NOT update yet.
-    fireEvent.change(screen.getByLabelText(/cleanup hour/i), { target: { value: '7' } })
-    expect(screen.getByText(/Cleanup runs daily at 15:00/)).toBeInTheDocument()
-    expect(screen.queryByText(/Cleanup runs daily at 07:00/)).not.toBeInTheDocument()
+    // Change the input without saving — footer must NOT update yet.
+    fireEvent.change(screen.getByLabelText(/cleanup time/i), { target: { value: '07:45' } })
+    expect(screen.getByText(/Cleanup runs daily at 15:30/)).toBeInTheDocument()
+    expect(screen.queryByText(/Cleanup runs daily at 07:45/)).not.toBeInTheDocument()
   })
 
-  it('enables Save and sends the hour in the payload on save', async () => {
+  it('enables Save and sends minute-precision time in the payload', async () => {
     render(<SettingsDataBackups totalLogs={0} storage={null} />)
-    await screen.findByLabelText(/cleanup hour/i)
+    await screen.findByLabelText(/cleanup time/i)
 
-    // The panel has multiple "Save" buttons (one per section). The retention
-    // Save lives in the same card as the hour selector — walk up to the card
-    // and scope the query.
-    const hourSelect = screen.getByLabelText(/cleanup hour/i)
-    const card = hourSelect.closest('.rounded-lg')
+    const timeInput = screen.getByLabelText(/cleanup time/i)
+    const card = timeInput.closest('.rounded-lg')
     const saveBtn = Array.from(card.querySelectorAll('button'))
       .find(b => b.textContent.trim() === 'Save')
+
     expect(saveBtn).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText(/cleanup hour/i), { target: { value: '7' } })
+    // 23:17 — specifically the case the user called out as needing to work.
+    fireEvent.change(timeInput, { target: { value: '23:17' } })
     expect(saveBtn).not.toBeDisabled()
 
     fireEvent.click(saveBtn)
@@ -83,7 +83,7 @@ describe('retention hour selector', () => {
     expect(payload).toMatchObject({
       retention_days: 60,
       dns_retention_days: 10,
-      retention_hour: 7,
+      retention_time: '23:17',
     })
   })
 })

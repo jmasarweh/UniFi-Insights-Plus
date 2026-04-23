@@ -55,7 +55,7 @@
 | **Theming & Preferences** | Dark/light theme, country display format, IP subline (show ASN beneath IPs) |
 | **Interface Labels** | Color-coded labels for traffic flow, applied retroactively to all logs |
 | **CSV Export** | Download filtered results up to 100K rows |
-| **Retention** | Configurable per log type (60-day default, 10-day DNS) and cleanup hour (0–23, container-local time). Adjustable via Settings or env vars |
+| **Retention** | Configurable per log type (60-day default, 10-day DNS) and cleanup time (HH:MM, container-local). Adjustable via Settings or env vars |
 | **Backup & Restore** | Export/import all settings as JSON |
 | **External DB Support** | Run against an external PostgreSQL instead of the embedded one — compatible with Coolify, Unraid, managed Postgres, and any platform where bundled databases aren't allowed. [Setup guide](https://insightsplus.dev/docs/external-database) · [Migration guide for existing users](https://github.com/jmasarweh/UniFi-Insights-Plus/wiki/External-PostgreSQL-Migration-Guide) |
 | **DNS Ready** | Full DNS query parsing ([requires configuration](https://insightsplus.dev/docs)) |

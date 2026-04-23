@@ -13,9 +13,9 @@ import pytest
 
 # Import the real parser BEFORE any fixture runs. If we imported inside the
 # fixture, sys.modules['db'] would already be replaced with a MagicMock and
-# `parse_retention_hour` would be an auto-attr. Importing at module-top means
+# `parse_retention_time` would be an auto-attr. Importing at module-top means
 # we hold a reference to the actual function object, immune to later mocking.
-from db import parse_retention_hour as _real_parse_retention_hour
+from db import parse_retention_time as _real_parse_retention_time
 
 
 def _poll_until(test_client, expected_status, path='/api/config/retention/cleanup-status',
@@ -51,13 +51,13 @@ def client(monkeypatch):
     mock_deps.get_conn = MagicMock()
     mock_deps.put_conn = MagicMock()
     from types import SimpleNamespace
-    # SimpleNamespace, not RetentionDaysConfig / RetentionHourConfig: the db
+    # SimpleNamespace, not RetentionDaysConfig / RetentionTimeConfig: the db
     # module is mocked in sys.modules before routes are imported, so importing
     # the real NamedTuples from it would return a MagicMock. SimpleNamespace
     # gives route code the same .general / .dns / .hour / .source attribute
     # access without pretending to be the real type.
     default_days = SimpleNamespace(general=60, general_source='default', dns=10, dns_source='default')
-    default_hour = SimpleNamespace(hour=3, source='default')
+    default_time = SimpleNamespace(time='03:00', source='default')
     mock_deps.enricher_db = MagicMock()
     mock_deps.enricher_db.resolve_retention_days = MagicMock(return_value=default_days)
     mock_deps.unifi_api = MagicMock()
@@ -70,11 +70,11 @@ def client(monkeypatch):
     mock_db_module.Database = MagicMock()
     mock_db_module.Database.validate_retention_days = MagicMock()
     mock_db_module.Database.resolve_retention_days = MagicMock(return_value=default_days)
-    mock_db_module.Database.resolve_retention_hour = MagicMock(return_value=default_hour)
+    mock_db_module.Database.resolve_retention_time = MagicMock(return_value=default_time)
     mock_db_module.Database.RETENTION_BATCH_SIZE = 5000
-    # Use the REAL parse_retention_hour (imported at module top) so test and
+    # Use the REAL parse_retention_time (imported at module top) so test and
     # production share one function — semantics can't drift.
-    mock_db_module.parse_retention_hour = _real_parse_retention_hour
+    mock_db_module.parse_retention_time = _real_parse_retention_time
     mock_db_module.get_config = MagicMock(return_value=None)
     mock_db_module.set_config = MagicMock()
     mock_db_module.count_logs = MagicMock(return_value=0)
@@ -239,105 +239,113 @@ class TestRetentionCleanupStatus:
 
 
 class TestRetentionConfigGet:
-    def test_get_includes_retention_hour_default(self, client):
+    def test_get_includes_retention_time_default(self, client):
         test_client, mock_deps, mock_db, setup_mod = client
-        # Fixture default: (3, 'default'). No env dependence — the resolver is mocked.
+        # Fixture default: ('03:00', 'default'). No env dependence — the resolver is mocked.
         resp = test_client.get('/api/config/retention')
         assert resp.status_code == 200
         data = resp.json()
-        assert data['retention_hour'] == 3
-        assert data['hour_source'] == 'default'
+        assert data['retention_time'] == '03:00'
+        assert data['time_source'] == 'default'
 
-    def test_get_returns_saved_retention_hour(self, client):
+    def test_get_returns_saved_retention_time(self, client):
         from types import SimpleNamespace
         test_client, mock_deps, mock_db, setup_mod = client
-        mock_db.Database.resolve_retention_hour.return_value = SimpleNamespace(hour=7, source='ui')
+        mock_db.Database.resolve_retention_time.return_value = SimpleNamespace(time='07:30', source='ui')
         resp = test_client.get('/api/config/retention')
         assert resp.status_code == 200
         data = resp.json()
-        assert data['retention_hour'] == 7
-        assert data['hour_source'] == 'ui'
+        assert data['retention_time'] == '07:30'
+        assert data['time_source'] == 'ui'
 
 
 class TestRetentionConfigPost:
-    def test_post_saves_valid_retention_hour(self, client):
+    def test_post_saves_valid_retention_time(self, client):
         test_client, mock_deps, mock_db, setup_mod = client
-        resp = test_client.post('/api/config/retention', json={'retention_hour': 5})
+        resp = test_client.post('/api/config/retention', json={'retention_time': '05:17'})
         assert resp.status_code == 200
         # signal_receiver called so the running process re-registers the job
         mock_deps.signal_receiver.assert_called_once()
         # set_config called with the new value
         saved = [c for c in mock_db.set_config.call_args_list
-                 if c.args[1] == 'retention_hour']
+                 if c.args[1] == 'retention_time']
         assert len(saved) == 1
-        assert saved[0].args[2] == 5
+        assert saved[0].args[2] == '05:17'
 
-    def test_post_rejects_non_integer_retention_hour(self, client):
+    def test_post_canonicalises_retention_time(self, client):
+        """Parser zero-pads — '3:5' stored as '03:05'."""
+        test_client, mock_deps, mock_db, _ = client
+        resp = test_client.post('/api/config/retention', json={'retention_time': '3:5'})
+        assert resp.status_code == 200
+        saved = [c for c in mock_db.set_config.call_args_list
+                 if c.args[1] == 'retention_time']
+        assert saved[0].args[2] == '03:05'
+
+    def test_post_rejects_non_string_retention_time(self, client):
         test_client, _, _, _ = client
-        resp = test_client.post('/api/config/retention', json={'retention_hour': 'noon'})
+        resp = test_client.post('/api/config/retention', json={'retention_time': 1230})
         assert resp.status_code == 400
-        assert 'retention_hour' in resp.json()['detail']
+        assert 'retention_time' in resp.json()['detail']
 
-    def test_post_rejects_out_of_range_retention_hour(self, client):
+    def test_post_rejects_out_of_range_retention_time(self, client):
         test_client, _, _, _ = client
-        for bad in (-1, 24, 99):
-            resp = test_client.post('/api/config/retention', json={'retention_hour': bad})
-            assert resp.status_code == 400, f'{bad} should be rejected'
+        for bad in ('24:00', '12:60', '-1:00', 'noon', '12', '12:30:45'):
+            resp = test_client.post('/api/config/retention', json={'retention_time': bad})
+            assert resp.status_code == 400, f'{bad!r} should be rejected'
 
-    def test_post_without_hour_does_not_signal(self, client):
+    def test_post_without_time_does_not_signal(self, client):
         """Days-only updates should not trigger SIGUSR2 — scheduler doesn't need it."""
         test_client, mock_deps, _, _ = client
         resp = test_client.post('/api/config/retention', json={'retention_days': 30})
         assert resp.status_code == 200
         mock_deps.signal_receiver.assert_not_called()
 
-    def test_post_with_unchanged_hour_does_not_signal(self, client):
-        """Saving the same retention_hour as already stored must not trigger
-        SIGUSR2. The UI sends retention_hour on every save (part of the
+    def test_post_with_unchanged_time_does_not_signal(self, client):
+        """Saving the same retention_time as already stored must not trigger
+        SIGUSR2. The UI sends retention_time on every save (part of the
         combined dirty check), so a days-only edit always arrives with a
-        retention_hour field."""
+        retention_time field."""
         test_client, mock_deps, mock_db, _ = client
 
-        # get_config('retention_hour') returns 5 (current stored value)
+        # get_config('retention_time') returns '05:17' (current stored value)
         def get_config(db, key, *a, **kw):
-            return 5 if key == 'retention_hour' else None
+            return '05:17' if key == 'retention_time' else None
         mock_db.get_config.side_effect = get_config
 
-        resp = test_client.post('/api/config/retention', json={'retention_hour': 5})
+        resp = test_client.post('/api/config/retention', json={'retention_time': '05:17'})
         assert resp.status_code == 200
         mock_deps.signal_receiver.assert_not_called()
-        # And set_config should NOT have been called for retention_hour
         saved = [c for c in mock_db.set_config.call_args_list
-                 if c.args[1] == 'retention_hour']
-        assert saved == [], 'unchanged hour must not be re-written'
+                 if c.args[1] == 'retention_time']
+        assert saved == [], 'unchanged time must not be re-written'
 
 
-class TestRetentionHourImport:
-    def test_import_accepts_valid_retention_hour(self, client):
+class TestRetentionTimeImport:
+    def test_import_accepts_valid_retention_time(self, client):
         test_client, mock_deps, mock_db, setup_mod = client
         resp = test_client.post('/api/config/import', json={
-            'config': {'retention_hour': 15}
+            'config': {'retention_time': '15:30'}
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert 'retention_hour' in data.get('imported_keys', [])
-        assert 'retention_hour' not in data.get('failed_keys', [])
+        assert 'retention_time' in data.get('imported_keys', [])
+        assert 'retention_time' not in data.get('failed_keys', [])
 
-    def test_import_rejects_out_of_range_retention_hour(self, client):
+    def test_import_rejects_out_of_range_retention_time(self, client):
         test_client, _, _, _ = client
         resp = test_client.post('/api/config/import', json={
-            'config': {'retention_hour': 99}
+            'config': {'retention_time': '25:00'}
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert 'retention_hour' in data.get('failed_keys', [])
-        assert 'retention_hour' not in data.get('imported_keys', [])
+        assert 'retention_time' in data.get('failed_keys', [])
+        assert 'retention_time' not in data.get('imported_keys', [])
 
-    def test_import_rejects_non_integer_retention_hour(self, client):
+    def test_import_rejects_non_string_retention_time(self, client):
         test_client, _, _, _ = client
         resp = test_client.post('/api/config/import', json={
-            'config': {'retention_hour': 'noon'}
+            'config': {'retention_time': 1230}
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert 'retention_hour' in data.get('failed_keys', [])
+        assert 'retention_time' in data.get('failed_keys', [])

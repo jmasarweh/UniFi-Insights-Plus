@@ -502,7 +502,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
   const [retention, setRetention] = useState(null)
   const [retentionDays, setRetentionDays] = useState(60)
   const [dnsRetentionDays, setDnsRetentionDays] = useState(10)
-  const [retentionHour, setRetentionHour] = useState(3)
+  const [retentionTime, setRetentionTime] = useState('03:00')
   const [retentionSaving, setRetentionSaving] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
   const [retentionLoading, setRetentionLoading] = useState(true)
@@ -614,7 +614,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
       setRetention(data)
       setRetentionDays(data.retention_days)
       setDnsRetentionDays(data.dns_retention_days)
-      setRetentionHour(data.retention_hour ?? 3)
+      setRetentionTime(data.retention_time ?? '03:00')
     }).catch(err => {
       console.error('Failed to load retention config:', err)
       setRetentionLoadError(err.message || 'Failed to load retention settings')
@@ -650,7 +650,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
   const retentionDirty = retention && (
     retentionDays !== retention.retention_days ||
     dnsRetentionDays !== retention.dns_retention_days ||
-    retentionHour !== retention.retention_hour
+    retentionTime !== retention.retention_time
   )
 
   async function saveRetention() {
@@ -663,13 +663,13 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
       await updateRetentionConfig({
         retention_days: retentionDays,
         dns_retention_days: dnsRetentionDays,
-        retention_hour: retentionHour,
+        retention_time: retentionTime,
       })
       setRetention(prev => ({
         ...prev,
         retention_days: retentionDays,
         dns_retention_days: dnsRetentionDays,
-        retention_hour: retentionHour,
+        retention_time: retentionTime,
       }))
       setRetentionMsg({ type: 'success', text: 'Retention settings saved' })
       if (wasLowered) {
@@ -911,21 +911,18 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
               </div>
             </div>
 
-            {/* Cleanup hour */}
+            {/* Cleanup time */}
             <div>
               <div className="flex items-center justify-between">
-                <label className="text-base text-gray-200 font-medium" htmlFor="retention-hour">Cleanup hour</label>
+                <label className="text-base text-gray-200 font-medium" htmlFor="retention-time">Cleanup time</label>
                 <div className="flex items-center gap-2">
-                  <select
-                    id="retention-hour"
-                    value={retentionHour}
-                    onChange={e => setRetentionHour(Number(e.target.value))}
-                    className="w-20 px-2 py-1 rounded bg-black border border-gray-600 font-mono text-sm text-gray-200 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                  >
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                    ))}
-                  </select>
+                  <input
+                    id="retention-time"
+                    type="time"
+                    value={retentionTime}
+                    onChange={e => setRetentionTime(e.target.value)}
+                    className="w-24 px-2 py-1 rounded bg-black border border-gray-600 font-mono text-sm text-gray-200 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                  />
                   <span className="text-sm text-gray-500">container time</span>
                 </div>
               </div>
@@ -993,7 +990,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
           <div className="px-5 py-3 flex items-center justify-between">
             <p className="text-sm text-gray-500">
               {totalLogs != null && <>{totalLogs.toLocaleString()} logs stored · </>}
-              Cleanup runs daily at {String(retention?.retention_hour ?? 3).padStart(2, '0')}:00
+              Cleanup runs daily at {retention?.retention_time ?? '03:00'}
             </p>
             <div className="flex items-center gap-3">
               {retentionMsg && (

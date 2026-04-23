@@ -453,50 +453,76 @@ def test_validate_retention_days_accepts_valid():
     Database.validate_retention_days(1, 1)
 
 
-# ── Retention hour resolution ─────────────────────────────────────────────────
+# ── Retention time resolution ────────────────────────────────────────────────
 
-def test_resolve_retention_hour_returns_ui_value(monkeypatch):
+def test_resolve_retention_time_returns_ui_value(monkeypatch):
     """system_config value wins over env and default."""
     db = MagicMock()
-    db.get_config = MagicMock(return_value=5)
-    monkeypatch.setenv('RETENTION_HOUR', '99')  # would be invalid — proves UI wins
-    assert Database.resolve_retention_hour(db) == (5, 'ui')
+    db.get_config = MagicMock(return_value='05:17')
+    monkeypatch.setenv('RETENTION_TIME', '99:99')  # would be invalid — proves UI wins
+    assert Database.resolve_retention_time(db) == ('05:17', 'ui')
 
 
-def test_resolve_retention_hour_falls_back_to_env(monkeypatch):
+def test_resolve_retention_time_falls_back_to_env(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_HOUR', '7')
-    assert Database.resolve_retention_hour(db) == (7, 'env')
+    monkeypatch.setenv('RETENTION_TIME', '07:45')
+    assert Database.resolve_retention_time(db) == ('07:45', 'env')
 
 
-def test_resolve_retention_hour_default_when_unset(monkeypatch):
-    # conftest._clean_env already delenv'd RETENTION_HOUR. Test is env-insensitive.
+def test_resolve_retention_time_default_when_unset(monkeypatch):
+    # conftest._clean_env already delenv'd RETENTION_TIME. Test is env-insensitive.
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    assert Database.resolve_retention_hour(db) == (3, 'default')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
-def test_resolve_retention_hour_invalid_env_string_falls_to_default(monkeypatch):
+def test_resolve_retention_time_invalid_env_string_falls_to_default(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_HOUR', 'not-a-number')
-    assert Database.resolve_retention_hour(db) == (3, 'default')
+    monkeypatch.setenv('RETENTION_TIME', 'not-a-time')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
-def test_resolve_retention_hour_out_of_range_env_falls_to_default(monkeypatch):
+def test_resolve_retention_time_out_of_range_env_falls_to_default(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_HOUR', '25')
-    assert Database.resolve_retention_hour(db) == (3, 'default')
+    monkeypatch.setenv('RETENTION_TIME', '25:00')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
-def test_resolve_retention_hour_invalid_ui_falls_through_to_env(monkeypatch):
+def test_resolve_retention_time_invalid_ui_falls_through_to_env(monkeypatch):
     """Invalid system_config value must NOT short-circuit — env should still win."""
     db = MagicMock()
-    db.get_config = MagicMock(return_value=99)  # out of range
-    monkeypatch.setenv('RETENTION_HOUR', '7')
-    assert Database.resolve_retention_hour(db) == (7, 'env')
+    db.get_config = MagicMock(return_value='99:99')  # out of range
+    monkeypatch.setenv('RETENTION_TIME', '07:30')
+    assert Database.resolve_retention_time(db) == ('07:30', 'env')
+
+
+# ── parse_retention_time direct coverage ─────────────────────────────────────
+
+def test_parse_retention_time_accepts_minute_precision():
+    from db import parse_retention_time
+    assert parse_retention_time('23:17') == '23:17'
+    assert parse_retention_time('00:00') == '00:00'
+    assert parse_retention_time('23:59') == '23:59'
+
+
+def test_parse_retention_time_zero_pads():
+    from db import parse_retention_time
+    assert parse_retention_time('3:5') == '03:05'
+    assert parse_retention_time('9:0') == '09:00'
+
+
+def test_parse_retention_time_rejects_invalid():
+    from db import parse_retention_time
+    assert parse_retention_time('24:00') is None     # hour out of range
+    assert parse_retention_time('12:60') is None     # minute out of range
+    assert parse_retention_time('not-a-time') is None
+    assert parse_retention_time('12') is None        # missing colon
+    assert parse_retention_time('12:30:45') is None  # too many parts
+    assert parse_retention_time(1230) is None        # not a string
+    assert parse_retention_time(None) is None
 
 
 # ── Retention days resolution ────────────────────────────────────────────────
