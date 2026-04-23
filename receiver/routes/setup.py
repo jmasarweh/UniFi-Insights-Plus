@@ -688,15 +688,11 @@ def get_retention():
         dns = 10
         dns_source = 'default'
 
-    # Estimate log counts for slider steps
-    estimates = _estimate_log_counts()
-
     return {
         'retention_days': general,
         'dns_retention_days': dns,
         'general_source': general_source,
         'dns_source': dns_source,
-        'estimates': estimates,
     }
 
 
@@ -984,41 +980,6 @@ def get_purge_status():
     with _purge_lock:
         _purge_gc()
         return {lt: dict(job) for lt, job in _purge_jobs.items()}
-
-
-def _estimate_log_counts() -> dict:
-    """Estimate total log count for each retention slider step.
-
-    Uses the average daily rate from the last 7 days to extrapolate.
-    Returns dict of {days_str: estimated_count}.
-    """
-    steps = [60, 120, 180, 270, 365]
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            # Get actual count and date range for last 7 days
-            cur.execute("""
-                SELECT COUNT(*),
-                       EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 86400.0
-                FROM logs
-                WHERE log_type != 'dns'
-                  AND timestamp >= NOW() - INTERVAL '7 days'
-            """)
-            row = cur.fetchone()
-            count_7d = row[0] or 0
-            span_days = row[1] or 0
-
-            if span_days < 0.5 or count_7d < 10:
-                # Not enough data to estimate
-                return {str(s): None for s in steps}
-
-            daily_rate = count_7d / span_days
-            return {str(s): int(daily_rate * s) for s in steps}
-    except Exception:
-        logger.debug("Failed to estimate log counts", exc_info=True)
-        return {str(s): None for s in steps}
-    finally:
-        put_conn(conn)
 
 
 # ── UI Settings (endpoints) ──────────────────────────────────────────────────
