@@ -44,8 +44,16 @@ def client(monkeypatch):
     mock_deps.APP_VERSION = '3.4.1-test'
     mock_deps.get_conn = MagicMock()
     mock_deps.put_conn = MagicMock()
+    from types import SimpleNamespace
+    # SimpleNamespace, not RetentionDaysConfig / RetentionHourConfig: the db
+    # module is mocked in sys.modules before routes are imported, so importing
+    # the real NamedTuples from it would return a MagicMock. SimpleNamespace
+    # gives route code the same .general / .dns / .hour / .source attribute
+    # access without pretending to be the real type.
+    default_days = SimpleNamespace(general=60, general_source='default', dns=10, dns_source='default')
+    default_hour = SimpleNamespace(hour=3, source='default')
     mock_deps.enricher_db = MagicMock()
-    mock_deps.enricher_db.resolve_retention_days = MagicMock(return_value=(60, 10))
+    mock_deps.enricher_db.resolve_retention_days = MagicMock(return_value=default_days)
     mock_deps.unifi_api = MagicMock()
     mock_deps.signal_receiver = MagicMock()
     mock_deps.ttl_cache = MagicMock(return_value=lambda f: f)
@@ -55,6 +63,8 @@ def client(monkeypatch):
     mock_db_module = MagicMock()
     mock_db_module.Database = MagicMock()
     mock_db_module.Database.validate_retention_days = MagicMock()
+    mock_db_module.Database.resolve_retention_days = MagicMock(return_value=default_days)
+    mock_db_module.Database.resolve_retention_hour = MagicMock(return_value=default_hour)
     mock_db_module.Database.RETENTION_BATCH_SIZE = 5000
     mock_db_module.get_config = MagicMock(return_value=None)
     mock_db_module.set_config = MagicMock()

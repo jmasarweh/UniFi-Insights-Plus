@@ -742,8 +742,13 @@ def _cleanup_gc():
 
 
 def _resolve_retention_days():
-    """Return (general_days, dns_days) via the shared DB resolver."""
-    return enricher_db.resolve_retention_days()
+    """Return (general_days, dns_days) via the shared DB resolver.
+
+    Drops the source fields — callers in this module only need the integers.
+    The GET endpoint calls the full resolver directly.
+    """
+    cfg = Database.resolve_retention_days(enricher_db)
+    return (cfg.general, cfg.dns)
 
 
 def _run_cleanup_worker(general_days: int, dns_days: int):

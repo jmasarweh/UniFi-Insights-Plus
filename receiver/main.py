@@ -267,8 +267,8 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
 
     def retention_cleanup():
         try:
-            general, dns = db.resolve_retention_days()
-            result = db.run_retention_cleanup(general, dns)
+            cfg = Database.resolve_retention_days(db)
+            result = db.run_retention_cleanup(cfg.general, cfg.dns)
             if result['status'] == 'partial':
                 logger.warning("Retention cleanup partial: %d deleted, error: %s",
                                result['deleted_so_far'], result['error'])

@@ -499,6 +499,51 @@ def test_resolve_retention_hour_invalid_ui_falls_through_to_env(monkeypatch):
     assert Database.resolve_retention_hour(db) == (7, 'env')
 
 
+# ── Retention days resolution ────────────────────────────────────────────────
+
+def test_resolve_retention_days_ui_wins_over_env(monkeypatch):
+    db = MagicMock()
+    def get_config(key, *a, **kw):
+        return {'retention_days': 7, 'dns_retention_days': 5}.get(key)
+    db.get_config = MagicMock(side_effect=get_config)
+    monkeypatch.setenv('RETENTION_DAYS', '999')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '999')
+    assert Database.resolve_retention_days(db) == (7, 'ui', 5, 'ui')
+
+
+def test_resolve_retention_days_env_when_ui_unset(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_DAYS', '14')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '3')
+    assert Database.resolve_retention_days(db) == (14, 'env', 3, 'env')
+
+
+def test_resolve_retention_days_defaults_when_all_unset():
+    # conftest._clean_env scrubs the env; no need to delenv here.
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    assert Database.resolve_retention_days(db) == (60, 'default', 10, 'default')
+
+
+def test_resolve_retention_days_invalid_env_falls_through_to_default(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_DAYS', 'not-a-number')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', 'also-bad')
+    assert Database.resolve_retention_days(db) == (60, 'default', 10, 'default')
+
+
+def test_resolve_retention_days_independent_sources(monkeypatch):
+    """General and DNS can resolve from different sources in the same call."""
+    db = MagicMock()
+    def get_config(key, *a, **kw):
+        return 30 if key == 'retention_days' else None
+    db.get_config = MagicMock(side_effect=get_config)
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '5')
+    assert Database.resolve_retention_days(db) == (30, 'ui', 5, 'env')
+
+
 # ── Batched retention cleanup ─────────────────────────────────────────────────
 
 class FakeRetentionConn:

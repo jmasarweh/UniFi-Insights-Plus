@@ -40,6 +40,14 @@ def client(monkeypatch):
     mock_db_module = MagicMock()
     mock_db_module.get_config = MagicMock(return_value=None)
     mock_db_module.is_external_db = MagicMock(return_value=False)
+    # SimpleNamespace — see testing rule in test_routes_retention.py fixture.
+    # Importing RetentionDaysConfig here would yield a MagicMock because the
+    # db module is being replaced in sys.modules.
+    from types import SimpleNamespace
+    mock_db_module.Database = MagicMock()
+    mock_db_module.Database.resolve_retention_days = MagicMock(
+        return_value=SimpleNamespace(general=60, general_source='default', dns=10, dns_source='default')
+    )
     monkeypatch.setitem(sys.modules, 'db', mock_db_module)
 
     # Now we can safely import and create the test client
