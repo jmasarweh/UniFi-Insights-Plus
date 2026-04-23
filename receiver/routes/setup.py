@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from psycopg2.extras import RealDictCursor, Json
 
-from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key
+from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_hour
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
 from unifi_api import UniFiAPI
 from firewall_policy_matcher import invalidate_cache as invalidate_fw_cache
@@ -430,7 +430,7 @@ _EXPORTABLE_KEYS = [
     'wizard_path', 'unifi_enabled', 'unifi_host', 'unifi_site',
     'unifi_verify_ssl', 'unifi_poll_interval', 'unifi_features',
     'unifi_controller_name', 'unifi_controller_type',
-    'retention_days', 'dns_retention_days',
+    'retention_days', 'dns_retention_days', 'retention_hour',
     'mcp_enabled', 'mcp_audit_enabled', 'mcp_audit_retention_days', 'mcp_allowed_origins',
     'auth_session_ttl_hours', 'audit_log_retention_days',
     *_UI_SETTINGS_DEFAULTS.keys(),
@@ -542,6 +542,12 @@ def import_config(body: dict):
             except (ValueError, TypeError):
                 failed_keys.append(key)
                 continue
+        elif key == 'retention_hour':
+            parsed = parse_retention_hour(val)
+            if parsed is None:
+                failed_keys.append(key)
+                continue
+            val = parsed
         set_config(enricher_db, key, val)
         imported_keys.append(key)
 
@@ -651,48 +657,16 @@ def save_vpn_networks(body: dict):
 @router.get("/api/config/retention")
 def get_retention():
     """Return current retention configuration with effective values and source."""
-    ui_general = get_config(enricher_db, 'retention_days')
-    ui_dns = get_config(enricher_db, 'dns_retention_days')
-
-    env_general = os.environ.get('RETENTION_DAYS')
-    env_dns = os.environ.get('DNS_RETENTION_DAYS')
-
-    # Resolve effective values: UI > env > defaults
-    if ui_general is not None:
-        general = int(ui_general)
-        general_source = 'ui'
-    elif env_general:
-        try:
-            general = int(env_general)
-            general_source = 'env'
-        except ValueError:
-            logger.warning("Invalid RETENTION_DAYS env value: %r, using default", env_general)
-            general = 60
-            general_source = 'default'
-    else:
-        general = 60
-        general_source = 'default'
-
-    if ui_dns is not None:
-        dns = int(ui_dns)
-        dns_source = 'ui'
-    elif env_dns:
-        try:
-            dns = int(env_dns)
-            dns_source = 'env'
-        except ValueError:
-            logger.warning("Invalid DNS_RETENTION_DAYS env value: %r, using default", env_dns)
-            dns = 10
-            dns_source = 'default'
-    else:
-        dns = 10
-        dns_source = 'default'
+    days = Database.resolve_retention_days(enricher_db)
+    hour = Database.resolve_retention_hour(enricher_db)
 
     return {
-        'retention_days': general,
-        'dns_retention_days': dns,
-        'general_source': general_source,
-        'dns_source': dns_source,
+        'retention_days': days.general,
+        'dns_retention_days': days.dns,
+        'retention_hour': hour.hour,
+        'general_source': days.general_source,
+        'dns_source': days.dns_source,
+        'hour_source': hour.source,
     }
 
 
@@ -719,6 +693,23 @@ def update_retention(body: dict):
         if not (1 <= dns_days <= 3650):
             raise HTTPException(status_code=400, detail="dns_retention_days must be between 1 and 3650")
         set_config(enricher_db, 'dns_retention_days', dns_days)
+
+    raw_hour = body.get('retention_hour')
+    hour_changed = False
+    if raw_hour is not None:
+        hour = parse_retention_hour(raw_hour)
+        if hour is None:
+            raise HTTPException(
+                status_code=400,
+                detail="retention_hour must be an integer between 0 and 23"
+            )
+        set_config(enricher_db, 'retention_hour', hour)
+        hour_changed = True
+
+    # Only signal the receiver when the *hour* changes — days are re-resolved
+    # from the DB on every scheduled run, so they don't need a reload.
+    if hour_changed:
+        signal_receiver()
 
     return {"success": True}
 
