@@ -280,7 +280,8 @@ def complete_setup(body: dict):
     invalidate_fw_cache()
 
     # Signal receiver process to reload config
-    signal_receiver()
+    if not signal_receiver():
+        logger.warning("Config saved but receiver reload signal failed; restart may be required")
 
     return {"success": True}
 
@@ -596,7 +597,8 @@ def import_config(body: dict):
             put_conn(conn)
 
     # Signal receiver to reload config
-    signal_receiver()
+    if not signal_receiver():
+        logger.warning("Config saved but receiver reload signal failed; restart may be required")
 
     # Reload UniFi API if any unifi settings changed
     has_unifi_key = any(k.startswith('unifi_') for k in imported_keys)
@@ -648,7 +650,8 @@ def save_vpn_networks(body: dict):
     set_config(enricher_db, 'interface_labels', labels)
     _prune_dismissed("vpn_toast_dismissed", set(vpn.keys()))
     invalidate_fw_cache()
-    signal_receiver()
+    if not signal_receiver():
+        logger.warning("Config saved but receiver reload signal failed; restart may be required")
     return {"success": True}
 
 
@@ -1027,6 +1030,6 @@ def update_ui_settings(body: dict):
                 actually_changed_processing = True
         set_config(enricher_db, key, val)
     # Signal receiver to reload only when processing settings actually changed
-    if actually_changed_processing:
-        signal_receiver()
+    if actually_changed_processing and not signal_receiver():
+        logger.warning("Config saved but receiver reload signal failed; restart may be required")
     return {"success": True}
