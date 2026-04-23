@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from contextlib import contextmanager
+from typing import NamedTuple
 
 import psycopg2
 import psycopg2.errors
@@ -151,6 +152,70 @@ INSERT_SQL = f"""
     INSERT INTO logs ({', '.join(INSERT_COLUMNS)})
     VALUES ({', '.join(['%s'] * len(INSERT_COLUMNS))})
 """
+
+
+# ── Retention configuration — parsers and result types ───────────────────────
+
+def parse_retention_time(raw) -> str | None:
+    """Parse and range-validate a retention_time input value.
+
+    Returns a canonical 'HH:MM' string in the 00:00..23:59 range, or None for
+    any non-coercible / out-of-range input. Accepts strings like '23:17',
+    '3:5', '03:05' — the return value is always zero-padded two-digit form.
+
+    Shared by Database.resolve_retention_time (for UI/env values) and the
+    route handlers in routes/setup.py (for POST bodies and import payloads).
+    Callers decide how to surface None — resolver falls through to the next
+    precedence level, POST raises HTTPException, import pushes to failed_keys.
+
+    The return value is directly consumable by `schedule.every().day.at(...)`
+    so there's no format conversion needed in the scheduler.
+    """
+    if not isinstance(raw, str):
+        return None
+    parts = raw.strip().split(':')
+    if len(parts) != 2:
+        return None
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+class RetentionTimeConfig(NamedTuple):
+    time: str    # 'HH:MM', 00:00..23:59
+    source: str  # 'ui' | 'env' | 'default'
+
+
+def parse_retention_days(raw) -> int | None:
+    """Parse and range-validate a retention-days input value.
+
+    Returns positive int or None for any non-coercible / non-positive input.
+    Accepts coercible values (including string digits) — this is for inputs
+    from untrusted sources (API bodies, env vars, DB values).
+
+    Related but distinct: `Database.validate_retention_days` is a stricter
+    post-resolution invariant check (type: must already be `int`, not just
+    coercible) used on values that have already been through a resolver.
+    Both functions exist because they run at different points in the
+    lifecycle — see that method's docstring for the scoping rule.
+    """
+    try:
+        days = int(raw)
+    except (ValueError, TypeError):
+        return None
+    return days if days > 0 else None
+
+
+class RetentionDaysConfig(NamedTuple):
+    general: int
+    general_source: str   # 'ui' | 'env' | 'default'
+    dns: int
+    dns_source: str       # 'ui' | 'env' | 'default'
 
 
 class Database:
@@ -966,7 +1031,23 @@ END $$;""",
 
     @staticmethod
     def validate_retention_days(general_days: int, dns_days: int):
-        """Validate retention day values. Raises ValueError on bad input."""
+        """Post-resolution invariant check: the given values must already be
+        positive Python ints. Raises ValueError on bad input.
+
+        This is stricter than `parse_retention_days` by design:
+          - `parse_retention_days` is the input-validation entry point —
+            accepts any coercible value (strings, ints), used by the resolver
+            and the POST/import route handlers.
+          - `validate_retention_days` is a post-resolution sanity check —
+            used by `run_retention_cleanup` and `run_retention_cleanup_now`
+            to catch wiring bugs where a non-int value somehow reached a
+            code path that expected resolved, already-validated integers.
+
+        If both functions still exist after this refactor, it is because
+        they run at different lifecycle stages, not because the validation
+        rules are duplicated — the parser owns the acceptance rules; this
+        function owns the type-contract invariant.
+        """
         if not isinstance(general_days, int) or not isinstance(dns_days, int):
             raise ValueError(
                 f"retention days must be integers (general={general_days!r}, dns={dns_days!r})"
@@ -976,31 +1057,54 @@ END $$;""",
                 f"retention days must be positive (general={general_days}, dns={dns_days})"
             )
 
-    def resolve_retention_days(self) -> tuple[int, int]:
-        """Return (general_days, dns_days) from config > env > defaults.
+    @staticmethod
+    def resolve_retention_days(db) -> RetentionDaysConfig:
+        """Resolve general + DNS retention days from config > env > default.
 
-        Single source of truth for both the scheduler and the API route.
-        Handles malformed env values gracefully by falling back to defaults.
+        Invalid values at any level fall through to the next level. General and
+        DNS resolve independently and may come from different sources in the
+        same call. Uses the shared `parse_retention_days` helper so the parse
+        and range logic lives in exactly one place.
+
+        Returns a NamedTuple so callers write `cfg.general` / `cfg.dns_source`
+        and never depend on field order. NamedTuples still compare equal to
+        plain tuples, so existing test assertions that use positional literals
+        (e.g. `== (60, 'default', 10, 'default')`) keep working unchanged.
         """
-        try:
-            general = self.get_config('retention_days')
-            if general is not None:
-                general = int(general)
-            else:
-                general = int(os.environ.get('RETENTION_DAYS', '60'))
-        except (ValueError, TypeError):
-            logger.warning("Invalid RETENTION_DAYS, falling back to 60")
-            general = 60
-        try:
-            dns = self.get_config('dns_retention_days')
-            if dns is not None:
-                dns = int(dns)
-            else:
-                dns = int(os.environ.get('DNS_RETENTION_DAYS', '10'))
-        except (ValueError, TypeError):
-            logger.warning("Invalid DNS_RETENTION_DAYS, falling back to 10")
-            dns = 10
-        return general, dns
+        def _resolve_one(ui_key: str, env_key: str, default: int) -> tuple[int, str]:
+            ui = parse_retention_days(db.get_config(ui_key))
+            if ui is not None:
+                return (ui, 'ui')
+            env = parse_retention_days(os.environ.get(env_key))
+            if env is not None:
+                return (env, 'env')
+            return (default, 'default')
+
+        general, general_source = _resolve_one('retention_days', 'RETENTION_DAYS', 60)
+        dns, dns_source = _resolve_one('dns_retention_days', 'DNS_RETENTION_DAYS', 10)
+        return RetentionDaysConfig(general, general_source, dns, dns_source)
+
+    @staticmethod
+    def resolve_retention_time(db) -> RetentionTimeConfig:
+        """Resolve retention cleanup time (HH:MM) from config > env > default.
+
+        An invalid `system_config` value does NOT short-circuit to default —
+        env is still consulted. Uses the shared `parse_retention_time` helper
+        so the parse-and-range logic lives in exactly one place.
+
+        Made a staticmethod (not instance method) because signal-handler code
+        in main.py calls it with an arbitrary Database reference and a pure
+        function is easier to test.
+        """
+        ui = parse_retention_time(db.get_config('retention_time'))
+        if ui is not None:
+            return RetentionTimeConfig(ui, 'ui')
+
+        env = parse_retention_time(os.environ.get('RETENTION_TIME'))
+        if env is not None:
+            return RetentionTimeConfig(env, 'env')
+
+        return RetentionTimeConfig('03:00', 'default')
 
     def run_retention_cleanup(self, general_days: int = 60, dns_days: int = 10,
                               progress_cb=None) -> dict:
@@ -1078,12 +1182,15 @@ END $$;""",
                          result['status'], result['deleted_so_far'], exc)
             return result
 
-        if result['deleted_so_far'] > 0:
-            logger.info("Retention cleanup: deleted %d old logs "
-                        "(dns_deleted=%d, non_dns_deleted=%d, "
-                        "general_retention=%d days, dns_retention=%d days)",
-                        result['deleted_so_far'], result['dns_deleted'],
-                        result['non_dns_deleted'], general_days, dns_days)
+        # Always log completion — including zero-row runs — so operators can
+        # confirm the cleanup fired even on quiet days. Previously gated on
+        # deleted_so_far > 0, which made successful no-op runs indistinguishable
+        # from the job never firing at all.
+        logger.info("Retention cleanup: deleted %d old logs "
+                    "(dns_deleted=%d, non_dns_deleted=%d, "
+                    "general_retention=%d days, dns_retention=%d days)",
+                    result['deleted_so_far'], result['dns_deleted'],
+                    result['non_dns_deleted'], general_days, dns_days)
         return result
 
     def get_stats(self) -> dict:

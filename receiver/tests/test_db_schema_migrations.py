@@ -453,6 +453,123 @@ def test_validate_retention_days_accepts_valid():
     Database.validate_retention_days(1, 1)
 
 
+# ── Retention time resolution ────────────────────────────────────────────────
+
+def test_resolve_retention_time_returns_ui_value(monkeypatch):
+    """system_config value wins over env and default."""
+    db = MagicMock()
+    db.get_config = MagicMock(return_value='05:17')
+    monkeypatch.setenv('RETENTION_TIME', '99:99')  # would be invalid — proves UI wins
+    assert Database.resolve_retention_time(db) == ('05:17', 'ui')
+
+
+def test_resolve_retention_time_falls_back_to_env(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', '07:45')
+    assert Database.resolve_retention_time(db) == ('07:45', 'env')
+
+
+def test_resolve_retention_time_default_when_unset(monkeypatch):
+    # conftest._clean_env already delenv'd RETENTION_TIME. Test is env-insensitive.
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
+
+
+def test_resolve_retention_time_invalid_env_string_falls_to_default(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', 'not-a-time')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
+
+
+def test_resolve_retention_time_out_of_range_env_falls_to_default(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', '25:00')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
+
+
+def test_resolve_retention_time_invalid_ui_falls_through_to_env(monkeypatch):
+    """Invalid system_config value must NOT short-circuit — env should still win."""
+    db = MagicMock()
+    db.get_config = MagicMock(return_value='99:99')  # out of range
+    monkeypatch.setenv('RETENTION_TIME', '07:30')
+    assert Database.resolve_retention_time(db) == ('07:30', 'env')
+
+
+# ── parse_retention_time direct coverage ─────────────────────────────────────
+
+def test_parse_retention_time_accepts_minute_precision():
+    from db import parse_retention_time
+    assert parse_retention_time('23:17') == '23:17'
+    assert parse_retention_time('00:00') == '00:00'
+    assert parse_retention_time('23:59') == '23:59'
+
+
+def test_parse_retention_time_zero_pads():
+    from db import parse_retention_time
+    assert parse_retention_time('3:5') == '03:05'
+    assert parse_retention_time('9:0') == '09:00'
+
+
+def test_parse_retention_time_rejects_invalid():
+    from db import parse_retention_time
+    assert parse_retention_time('24:00') is None     # hour out of range
+    assert parse_retention_time('12:60') is None     # minute out of range
+    assert parse_retention_time('not-a-time') is None
+    assert parse_retention_time('12') is None        # missing colon
+    assert parse_retention_time('12:30:45') is None  # too many parts
+    assert parse_retention_time(1230) is None        # not a string
+    assert parse_retention_time(None) is None
+
+
+# ── Retention days resolution ────────────────────────────────────────────────
+
+def test_resolve_retention_days_ui_wins_over_env(monkeypatch):
+    db = MagicMock()
+    def get_config(key, *a, **kw):
+        return {'retention_days': 7, 'dns_retention_days': 5}.get(key)
+    db.get_config = MagicMock(side_effect=get_config)
+    monkeypatch.setenv('RETENTION_DAYS', '999')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '999')
+    assert Database.resolve_retention_days(db) == (7, 'ui', 5, 'ui')
+
+
+def test_resolve_retention_days_env_when_ui_unset(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_DAYS', '14')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '3')
+    assert Database.resolve_retention_days(db) == (14, 'env', 3, 'env')
+
+
+def test_resolve_retention_days_defaults_when_all_unset():
+    # conftest._clean_env scrubs the env; no need to delenv here.
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    assert Database.resolve_retention_days(db) == (60, 'default', 10, 'default')
+
+
+def test_resolve_retention_days_invalid_env_falls_through_to_default(monkeypatch):
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_DAYS', 'not-a-number')
+    monkeypatch.setenv('DNS_RETENTION_DAYS', 'also-bad')
+    assert Database.resolve_retention_days(db) == (60, 'default', 10, 'default')
+
+
+def test_resolve_retention_days_independent_sources(monkeypatch):
+    """General and DNS can resolve from different sources in the same call."""
+    db = MagicMock()
+    def get_config(key, *a, **kw):
+        return 30 if key == 'retention_days' else None
+    db.get_config = MagicMock(side_effect=get_config)
+    monkeypatch.setenv('DNS_RETENTION_DAYS', '5')
+    assert Database.resolve_retention_days(db) == (30, 'ui', 5, 'env')
+
+
 # ── Batched retention cleanup ─────────────────────────────────────────────────
 
 class FakeRetentionConn:
