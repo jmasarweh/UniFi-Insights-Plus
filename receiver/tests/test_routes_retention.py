@@ -233,7 +233,7 @@ class TestRetentionCleanupStatus:
 
         test_client.post('/api/config/retention/cleanup')
 
-        resp, data = _poll_until(test_client, 'partial')
+        _resp, data = _poll_until(test_client, 'partial')
         assert data['status'] == 'partial'
         assert data['deleted_so_far'] == 25
         assert data['error'] == 'db error'
@@ -251,7 +251,7 @@ class TestRetentionCleanupStatus:
 
         test_client.post('/api/config/retention/cleanup')
 
-        resp, data = _poll_until(test_client, 'failed')
+        _resp, data = _poll_until(test_client, 'failed')
         assert data['status'] == 'failed'
         assert data['error'] == 'connection lost'
 
