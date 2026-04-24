@@ -122,15 +122,15 @@ ALTER TABLE logs SET (
     autovacuum_vacuum_cost_limit    = 10000
 );
 
--- Log every autovacuum operation on this database for production observability.
--- Lets operators verify the scale_factor tuning is firing as expected after
--- large cleanups.  Set log_autovacuum_min_duration = 60000 to restrict logging
--- to operations taking > 60 s if the default produces too much volume.
+-- Log autovacuum operations that take longer than 60 s on this database.
+-- This lets operators verify the scale_factor tuning is firing as expected
+-- after large cleanups without flooding logs on busy systems.
+-- Lower to '0' to log every autovacuum/autoanalyze for deeper debugging.
 DO $$
 BEGIN
     -- Use current_database() so this script is portable across any DB name.
     EXECUTE format(
-        'ALTER DATABASE %I SET log_autovacuum_min_duration = ''0''',
+        'ALTER DATABASE %I SET log_autovacuum_min_duration = ''60000''',
         current_database()
     );
 END $$;
