@@ -459,19 +459,19 @@ def test_resolve_retention_time_returns_ui_value(monkeypatch):
     """system_config value wins over env and default."""
     db = MagicMock()
     db.get_config = MagicMock(return_value='05:17')
-    monkeypatch.setenv('RETENTION_TIME', '99:99')  # would be invalid — proves UI wins
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', '99:99')  # would be invalid — proves UI wins
     assert Database.resolve_retention_time(db) == ('05:17', 'ui')
 
 
 def test_resolve_retention_time_falls_back_to_env(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_TIME', '07:45')
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', '07:45')
     assert Database.resolve_retention_time(db) == ('07:45', 'env')
 
 
 def test_resolve_retention_time_default_when_unset(monkeypatch):
-    # conftest._clean_env already delenv'd RETENTION_TIME. Test is env-insensitive.
+    # conftest._clean_env already delenv'd both env vars. Test is env-insensitive.
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
     assert Database.resolve_retention_time(db) == ('03:00', 'default')
@@ -480,14 +480,14 @@ def test_resolve_retention_time_default_when_unset(monkeypatch):
 def test_resolve_retention_time_invalid_env_string_falls_to_default(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_TIME', 'not-a-time')
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', 'not-a-time')
     assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
 def test_resolve_retention_time_out_of_range_env_falls_to_default(monkeypatch):
     db = MagicMock()
     db.get_config = MagicMock(return_value=None)
-    monkeypatch.setenv('RETENTION_TIME', '25:00')
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', '25:00')
     assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
@@ -495,8 +495,69 @@ def test_resolve_retention_time_invalid_ui_falls_through_to_env(monkeypatch):
     """Invalid system_config value must NOT short-circuit — env should still win."""
     db = MagicMock()
     db.get_config = MagicMock(return_value='99:99')  # out of range
-    monkeypatch.setenv('RETENTION_TIME', '07:30')
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', '07:30')
     assert Database.resolve_retention_time(db) == ('07:30', 'env')
+
+
+# ── Legacy RETENTION_TIME deprecation fallback (v3.6.2 → v3.6.3 rename) ──────
+
+def test_resolve_retention_time_legacy_env_var_still_honored(monkeypatch, caplog):
+    """v3.6.2 shipped with RETENTION_TIME. v3.6.3 renamed to RETENTION_CLEANUP_TIME
+    but honours the old name for one release so existing deployments don't
+    silently revert to 03:00 on upgrade. Emits a WARNING when used."""
+    import logging
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', '23:42')
+
+    with caplog.at_level(logging.WARNING, logger='db'):
+        result = Database.resolve_retention_time(db)
+
+    assert result == ('23:42', 'env')
+    assert any('RETENTION_TIME' in rec.message and 'deprecated' in rec.message.lower()
+               for rec in caplog.records), \
+        'deprecation warning must fire when legacy env var is used'
+
+
+def test_resolve_retention_time_new_env_wins_over_legacy(monkeypatch):
+    """If both RETENTION_CLEANUP_TIME and RETENTION_TIME are set, the canonical
+    name wins and no deprecation fallback runs."""
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_CLEANUP_TIME', '10:00')
+    monkeypatch.setenv('RETENTION_TIME', '23:42')
+    assert Database.resolve_retention_time(db) == ('10:00', 'env')
+
+
+def test_resolve_retention_time_legacy_warning_fires_once(monkeypatch, caplog):
+    """The deprecation warning must NOT fire on every resolver call —
+    the resolver runs on every GET /api/config/retention and every SIGUSR2
+    scheduler rebuild. Warning once per process is enough."""
+    import logging
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', '23:42')
+
+    with caplog.at_level(logging.WARNING, logger='db'):
+        Database.resolve_retention_time(db)
+        Database.resolve_retention_time(db)
+        Database.resolve_retention_time(db)
+
+    deprecation_warnings = [
+        rec for rec in caplog.records
+        if 'RETENTION_TIME' in rec.message and 'deprecated' in rec.message.lower()
+    ]
+    assert len(deprecation_warnings) == 1, \
+        f'expected exactly 1 deprecation warning, got {len(deprecation_warnings)}'
+
+
+def test_resolve_retention_time_invalid_legacy_env_falls_to_default(monkeypatch):
+    """Bad legacy env value shouldn't keep the app stuck on it — fall
+    through to default just like the canonical env path does."""
+    db = MagicMock()
+    db.get_config = MagicMock(return_value=None)
+    monkeypatch.setenv('RETENTION_TIME', 'nonsense')
+    assert Database.resolve_retention_time(db) == ('03:00', 'default')
 
 
 # ── parse_retention_time direct coverage ─────────────────────────────────────

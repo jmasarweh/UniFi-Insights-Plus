@@ -191,6 +191,12 @@ class RetentionTimeConfig(NamedTuple):
     source: str  # 'ui' | 'env' | 'default'
 
 
+# Module-level flag so the legacy RETENTION_TIME deprecation warning fires
+# once per process, not on every resolver call (the resolver runs on every
+# GET /api/config/retention and every SIGUSR2 scheduler rebuild).
+_legacy_retention_time_warned = False
+
+
 def parse_retention_days(raw) -> int | None:
     """Parse and range-validate a retention-days input value.
 
@@ -1088,6 +1094,12 @@ END $$;""",
     def resolve_retention_time(db) -> RetentionTimeConfig:
         """Resolve retention cleanup time (HH:MM) from config > env > default.
 
+        Env precedence: RETENTION_CLEANUP_TIME (canonical) > RETENTION_TIME
+        (deprecated — v3.6.2 introduced this name, v3.6.3 renamed it). The
+        legacy name is still honored for one release so existing deployments
+        don't silently revert to the default, but its use logs a WARNING
+        (once per process) telling operators to rename.
+
         An invalid `system_config` value does NOT short-circuit to default —
         env is still consulted. Uses the shared `parse_retention_time` helper
         so the parse-and-range logic lives in exactly one place.
@@ -1096,13 +1108,28 @@ END $$;""",
         in main.py calls it with an arbitrary Database reference and a pure
         function is easier to test.
         """
+        global _legacy_retention_time_warned
+
         ui = parse_retention_time(db.get_config('retention_time'))
         if ui is not None:
             return RetentionTimeConfig(ui, 'ui')
 
-        env = parse_retention_time(os.environ.get('RETENTION_TIME'))
+        # Canonical env var
+        env = parse_retention_time(os.environ.get('RETENTION_CLEANUP_TIME'))
         if env is not None:
             return RetentionTimeConfig(env, 'env')
+
+        # Legacy env var (deprecated in v3.6.3). Honour it but warn — once.
+        legacy = parse_retention_time(os.environ.get('RETENTION_TIME'))
+        if legacy is not None:
+            if not _legacy_retention_time_warned:
+                logger.warning(
+                    "RETENTION_TIME env var is deprecated; rename to "
+                    "RETENTION_CLEANUP_TIME. The fallback will be removed "
+                    "in a future release."
+                )
+                _legacy_retention_time_warned = True
+            return RetentionTimeConfig(legacy, 'env')
 
         return RetentionTimeConfig('03:00', 'default')
 
