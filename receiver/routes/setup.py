@@ -727,7 +727,8 @@ def update_retention(body: dict):
     # reload. Scheduler rebuild is an OS-level signal + SIGUSR2 handler chain,
     # so avoiding no-op reloads keeps the system quiet.
     if time_changed:
-        signal_receiver()
+        if not signal_receiver():
+            logger.warning("Retention time saved but receiver reload signal failed; restart may be required")
 
     return {"success": True}
 
