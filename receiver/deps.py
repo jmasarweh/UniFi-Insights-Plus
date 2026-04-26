@@ -95,7 +95,7 @@ def put_conn(conn):
 
 # ── AbuseIPDB Enricher (for manual enrich endpoint) ─────────────────────────
 
-enricher_db = Database(conn_params, min_conn=1, max_conn=3)
+enricher_db = Database(conn_params, min_conn=2, max_conn=8)
 enricher_db.connect()
 abuseipdb = AbuseIPDBEnricher(db=enricher_db)
 
