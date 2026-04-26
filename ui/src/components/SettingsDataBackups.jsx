@@ -12,7 +12,6 @@ import InfoTooltip from './InfoTooltip'
 import SyslogToggle from './SyslogToggle'
 
 const RETENTION_PRESETS = [30, 60, 90, 120, 180, 365]
-const RETENTION_TIME_DEFAULT = '03:00'  // matches backend default in db.py resolve_retention_time
 const DISK_CRITICAL_BYTES = 512 * 1024 * 1024       // 512 MB
 const DISK_WARNING_BYTES  = 2 * 1024 * 1024 * 1024  // 2 GB
 const EXTERNAL_DB_WIKI_URL = 'https://github.com/jmasarweh/unifi-log-insight/wiki/External-PostgreSQL-Migration-Guide'
@@ -503,7 +502,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
   const [retention, setRetention] = useState(null)
   const [retentionDays, setRetentionDays] = useState(60)
   const [dnsRetentionDays, setDnsRetentionDays] = useState(10)
-  const [retentionTime, setRetentionTime] = useState(RETENTION_TIME_DEFAULT)
+  const [retentionTime, setRetentionTime] = useState('03:00')
   const [retentionSaving, setRetentionSaving] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
   const [retentionLoading, setRetentionLoading] = useState(true)
@@ -615,7 +614,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
       setRetention(data)
       setRetentionDays(data.retention_days)
       setDnsRetentionDays(data.dns_retention_days)
-      setRetentionTime(data.retention_time || RETENTION_TIME_DEFAULT)
+      setRetentionTime(data.retention_time ?? '03:00')
     }).catch(err => {
       console.error('Failed to load retention config:', err)
       setRetentionLoadError(err.message || 'Failed to load retention settings')
@@ -651,7 +650,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
   const retentionDirty = retention && (
     retentionDays !== retention.retention_days ||
     dnsRetentionDays !== retention.dns_retention_days ||
-    retentionTime !== (retention.retention_time || RETENTION_TIME_DEFAULT)
+    retentionTime !== retention.retention_time
   )
 
   async function saveRetention() {
@@ -833,7 +832,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
             </div>
           ) : retentionLoadError ? (
             <div className="p-5">
-              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
+              <div role="alert" className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
                 <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
                 </svg>
@@ -991,7 +990,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
           <div className="px-5 py-3 flex items-center justify-between">
             <p className="text-sm text-gray-500">
               {totalLogs != null && <>{totalLogs.toLocaleString()} logs stored · </>}
-              Cleanup runs daily at {retention?.retention_time || RETENTION_TIME_DEFAULT}
+              Cleanup runs daily at {retention?.retention_time ?? '03:00'}
             </p>
             <div className="flex items-center gap-3">
               {retentionMsg && (
@@ -1011,7 +1010,6 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
                 </button>
               )}
               <button
-                data-testid="retention-save-button"
                 onClick={saveRetention}
                 disabled={!retentionDirty || retentionSaving}
                 className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
