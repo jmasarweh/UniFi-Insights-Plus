@@ -17,6 +17,7 @@ router = APIRouter()
 
 @router.get("/api/abuseipdb/status")
 def abuseipdb_status():
+    """Return current AbuseIPDB quota stats (remaining checks, limit, reset time)."""
     stats = get_abuseipdb_stats(enricher_db)
     if not stats:
         return {"remaining": None, "limit": None}
@@ -33,6 +34,7 @@ def abuseipdb_status():
 
 @router.post("/api/enrich/{ip}")
 def enrich_ip(ip: str):
+    """Trigger an immediate AbuseIPDB lookup for a public IP and persist the result."""
     if not is_public_ip(ip):
         raise HTTPException(status_code=400, detail="Not a public IP")
 

@@ -18,6 +18,8 @@ router = APIRouter()
 
 
 class BatchThreatRequest(BaseModel):
+    """Request body for the batch threat-lookup endpoint."""
+
     ips: List[str]
 
 
@@ -133,6 +135,7 @@ def list_threats(
     sort: str = Query("threat_score", description="threat_score, looked_up_at, abuse_total_reports"),
     order: str = Query("desc", description="asc or desc"),
 ):
+    """Return paginated threat-score entries from the ip_threats cache."""
     allowed_sorts = {
         'threat_score': 'threat_score',
         'looked_up_at': 'looked_up_at',
