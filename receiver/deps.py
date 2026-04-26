@@ -24,6 +24,7 @@ logger = logging.getLogger('api')
 # ── Version ──────────────────────────────────────────────────────────────────
 
 def _read_version():
+    """Read the VERSION file from the container or local path."""
     for path in ('/app/VERSION', 'VERSION'):
         try:
             with open(path) as f:
@@ -111,11 +112,13 @@ pihole_poller = PiHolePoller(db=enricher_db, enricher=None)
 def ttl_cache(seconds=30):
     """Thread-safe TTL cache for expensive endpoint results."""
     def decorator(fn):
+        """Wrap fn with a per-function TTL cache."""
         lock = threading.Lock()
         cached = {'result': None, 'expires': 0}
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            """Return cached result or call fn and cache the fresh result."""
             now = time.monotonic()
             if cached['result'] is not None and now < cached['expires']:
                 return cached['result']
@@ -149,13 +152,29 @@ def get_config_source(db, key: str, env_map: dict, db_prefix: str) -> str:
     return 'default'
 
 
-def signal_receiver():
-    """Signal the receiver process to reload config."""
+def signal_receiver() -> bool:
+    """Signal the receiver process to reload config.
+
+    Returns True if the SIGUSR2 was delivered (pkill found a matching
+    process), False if no process was found or an exception occurred.
+    Callers should log a warning on False; the config is always committed
+    to the DB before this call so a failed signal is not data loss.
+    """
     try:
-        subprocess.run(['pkill', '-SIGUSR2', '-f', '/app/main.py'],
-                      check=False, timeout=2)
+        result = subprocess.run(['pkill', '-SIGUSR2', '-f', '/app/main.py'],
+                                check=False, timeout=2)
+        signaled = result.returncode == 0
         with open('/tmp/config_update_requested', 'w') as f:
             f.write(str(time.time()))
-        logger.info("Signaled receiver process to reload config")
+        if signaled:
+            logger.info("Signaled receiver process to reload config")
+        else:
+            logger.warning(
+                "signal_receiver: pkill found no matching process (exit %d) "
+                "-- config saved but reload requires a service restart",
+                result.returncode,
+            )
+        return signaled
     except Exception as e:
         logger.warning("Failed to signal receiver: %s", e)
+        return False
