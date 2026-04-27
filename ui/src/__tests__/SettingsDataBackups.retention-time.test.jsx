@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 
 const mockUpdateRetentionConfig = vi.fn(() => Promise.resolve({ success: true }))
 
@@ -68,8 +68,7 @@ describe('retention time input', () => {
 
     const timeInput = screen.getByLabelText(/cleanup time/i)
     const card = timeInput.closest('.rounded-lg')
-    const saveBtn = Array.from(card.querySelectorAll('button'))
-      .find(b => b.textContent.trim() === 'Save')
+    const saveBtn = within(card).getByRole('button', { name: /^Save$/ })
 
     expect(saveBtn).toBeDisabled()
 

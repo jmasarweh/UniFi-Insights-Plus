@@ -614,7 +614,7 @@ export default function SettingsDataBackups({ totalLogs, storage, onSaved }) {
       setRetention(data)
       setRetentionDays(data.retention_days)
       setDnsRetentionDays(data.dns_retention_days)
-      setRetentionTime(data.retention_time ?? '03:00')
+      setRetentionTime(data.retention_time || '03:00')
     }).catch(err => {
       console.error('Failed to load retention config:', err)
       setRetentionLoadError(err.message || 'Failed to load retention settings')
