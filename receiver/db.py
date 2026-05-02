@@ -682,6 +682,18 @@ END $$;""",
             )""",
             """CREATE INDEX IF NOT EXISTS idx_rdns_cache_looked_up_at
                 ON rdns_cache (looked_up_at)""",
+            # ── Autovacuum tuning for the high-churn logs table ──────────
+            # Default scale_factor=0.2 triggers autovacuum only after 20 % of
+            # rows are dead — on a 33 M-row table that is 6.6 M dead tuples.
+            # Lower thresholds ensure autovacuum fires promptly after batch
+            # retention deletes. ALTER TABLE logs SET is idempotent: safe to
+            # re-apply on every boot (no IF NOT EXISTS equivalent needed).
+            """ALTER TABLE logs SET (
+                autovacuum_vacuum_scale_factor  = 0.01,
+                autovacuum_vacuum_cost_delay    = 2,
+                autovacuum_analyze_scale_factor = 0.02,
+                autovacuum_vacuum_cost_limit    = 10000
+            )""",
         ]
         try:
             with self.get_conn() as conn:
