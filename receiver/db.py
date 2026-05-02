@@ -694,6 +694,15 @@ END $$;""",
                 autovacuum_analyze_scale_factor = 0.02,
                 autovacuum_vacuum_cost_limit    = 10000
             )""",
+            # Log autovacuum runs that exceed 60 s so operators can verify
+            # the tuned scale_factor is firing after large retention cleanups.
+            # Requires ALTER DATABASE privilege — skipped silently if missing.
+            """DO $$ BEGIN
+                EXECUTE format(
+                    'ALTER DATABASE %I SET log_autovacuum_min_duration = ''60000''',
+                    current_database()
+                );
+            END $$""",
         ]
         try:
             with self.get_conn() as conn:
