@@ -27,6 +27,7 @@ from backfill import BackfillTask
 from blacklist import BlacklistFetcher
 from unifi_api import UniFiAPI
 from pihole_api import PiHolePoller
+from technitium_api import TechnitiumPoller
 from routes.auth import auth_cleanup
 
 # Set by the SIGUSR2 handler when retention_time may have changed.
@@ -416,11 +417,15 @@ def main():
     # Initialize Pi-hole poller
     pihole = PiHolePoller(db=db, enricher=None)  # enricher set after creation
 
+    # Initialize Technitium poller
+    technitium = TechnitiumPoller(db=db, enricher=None)  # enricher set after creation
+
     # Initialize enrichment (with UniFi device name resolution)
     enricher = Enricher(db=db, unifi=unifi_api)
 
-    # Wire enricher into Pi-hole poller (created before enricher for signal handler)
+    # Wire enricher into DNS pollers (created before enricher for signal handler)
     pihole.set_enricher(enricher)
+    technitium.set_enricher(enricher)
 
     # Start receiver
     receiver = SyslogReceiver(db, enricher)
@@ -431,6 +436,7 @@ def main():
         receiver.stop()
         unifi_api.stop_polling()
         pihole.stop_polling()
+        technitium.stop_polling()
         enricher.close()
         db.close()
         sys.exit(0)
@@ -447,6 +453,7 @@ def main():
         parsers.reload_config_from_db(db)
         unifi_api.reload_config()
         pihole.reload_config()
+        technitium.reload_config()
         enricher.reload_config()
         receiver._load_disabled_types()
         # scheduler thread will rebuild the retention job on its next tick
@@ -481,6 +488,9 @@ def main():
     # Start Pi-hole polling (only runs if enabled)
     pihole.start_polling()
 
+    # Start Technitium polling (only runs if enabled)
+    technitium.start_polling()
+
     # Start receiving (blocks)
     try:
         receiver.start()
@@ -488,6 +498,7 @@ def main():
         receiver.stop()
         unifi_api.stop_polling()
         pihole.stop_polling()
+        technitium.stop_polling()
         enricher.close()
         db.close()
 
