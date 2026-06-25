@@ -14,7 +14,7 @@ import time
 
 from psycopg2 import extensions, pool
 
-from db import Database, build_conn_params, wait_for_postgres
+from db import Database, build_conn_params, env_pool_bounds, wait_for_postgres
 from enrichment import AbuseIPDBEnricher
 from unifi_api import UniFiAPI
 from pihole_api import PiHolePoller
@@ -39,7 +39,9 @@ APP_VERSION = _read_version()
 conn_params = build_conn_params()
 wait_for_postgres(conn_params)
 
-db_pool = pool.ThreadedConnectionPool(2, 10, **conn_params)
+_pool_min, _pool_max = env_pool_bounds('DB_POOL_MIN', 'DB_POOL_MAX', 2, 10)
+db_pool = pool.ThreadedConnectionPool(_pool_min, _pool_max, **conn_params)
+logger.info("API connection pool ready (min=%d, max=%d)", _pool_min, _pool_max)
 
 
 def get_conn(retries=3, wait=0.5):

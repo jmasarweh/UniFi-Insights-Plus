@@ -21,7 +21,7 @@ import schedule
 
 from parsers import parse_log
 import parsers
-from db import Database, get_config, set_config, build_conn_params, is_external_db, wait_for_postgres
+from db import Database, get_config, set_config, build_conn_params, env_pool_bounds, is_external_db, wait_for_postgres
 from enrichment import Enricher
 from backfill import BackfillTask
 from blacklist import BlacklistFetcher
@@ -367,8 +367,9 @@ def main():
     # Wait for PostgreSQL
     wait_for_postgres(conn_params)
 
-    # Initialize database
-    db = Database(conn_params)
+    # Initialize database (pool sizes configurable via DB_POOL_MIN/DB_POOL_MAX)
+    _pool_min, _pool_max = env_pool_bounds('DB_POOL_MIN', 'DB_POOL_MAX', 2, 10)
+    db = Database(conn_params, min_conn=_pool_min, max_conn=_pool_max)
     db.connect()
 
     # Create performance indexes that require CONCURRENTLY (existing installs)

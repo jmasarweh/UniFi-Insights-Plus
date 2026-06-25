@@ -22,6 +22,45 @@ from psycopg2.extras import Json
 logger = logging.getLogger(__name__)
 
 
+# ── Environment Helpers ─────────────────────────────────────────────────────────
+
+def env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    """Read an integer from the environment, falling back to ``default``.
+
+    Invalid (non-integer) values log a warning and fall back to the default.
+    Values below ``minimum`` (when given) are clamped up to ``minimum``.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == '':
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r (expected integer); using default %d", name, raw, default)
+        return default
+    if minimum is not None and value < minimum:
+        logger.warning("%s=%d is below minimum %d; using %d", name, value, minimum, minimum)
+        return minimum
+    return value
+
+
+def env_pool_bounds(min_name: str, max_name: str,
+                    default_min: int, default_max: int) -> tuple[int, int]:
+    """Resolve (min, max) connection-pool sizes from the environment.
+
+    Guarantees ``max >= 1`` and ``min <= max`` (min is clamped down to max
+    if misconfigured) so psycopg2's pool constructor never receives an
+    invalid range.
+    """
+    pool_min = env_int(min_name, default_min, minimum=0)
+    pool_max = env_int(max_name, default_max, minimum=1)
+    if pool_min > pool_max:
+        logger.warning("%s=%d exceeds %s=%d; clamping min down to max",
+                       min_name, pool_min, max_name, pool_max)
+        pool_min = pool_max
+    return pool_min, pool_max
+
+
 # ── API Key Encryption ────────────────────────────────────────────────────────
 
 def _derive_fernet_key(postgres_password: str) -> bytes:
@@ -85,7 +124,7 @@ def build_conn_params() -> dict:
         'dbname': os.environ.get('DB_NAME', 'unifi_logs'),
         'user': os.environ.get('DB_USER', 'unifi'),
         'password': os.environ.get('DB_PASSWORD') or os.environ.get('POSTGRES_PASSWORD', 'changeme'),
-        'connect_timeout': 10,
+        'connect_timeout': env_int('DB_CONNECT_TIMEOUT', 10, minimum=1),
         'keepalives': 1,
         'keepalives_idle': 30,
         'keepalives_interval': 10,
