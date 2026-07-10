@@ -452,6 +452,28 @@ export async function testPiholeConnection(params) {
   })
 }
 
+// ── Technitium Settings API ──────────────────────────────────────────────────
+
+export async function fetchTechnitiumSettings() {
+  return apiFetch(`${BASE}/settings/technitium`)
+}
+
+export async function updateTechnitiumSettings(settings) {
+  return apiFetch(`${BASE}/settings/technitium`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings)
+  })
+}
+
+export async function testTechnitiumConnection(params) {
+  return apiFetch(`${BASE}/settings/technitium/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  })
+}
+
 // ── Version Check ────────────────────────────────────────────────────────────
 
 export async function fetchLatestRelease(currentVersion) {

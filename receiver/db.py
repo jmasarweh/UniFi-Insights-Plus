@@ -1052,6 +1052,40 @@ END $$;""",
         finally:
             self.pool.putconn(conn, close=failed)
 
+    def insert_technitium_batch(self, logs: list[dict], server_id: str, new_cursor: int):
+        """Atomic insert of one Technitium server's logs + its cursor update.
+
+        Cursors are stored per-server in the 'technitium_cursors' jsonb map
+        (each cluster node has an independent rowNumber sequence). The cursor
+        for ``server_id`` is merged into that map in the same transaction as
+        the inserts. On ANY failure the whole transaction rolls back — no
+        partial inserts, no cursor drift.
+        """
+        if not logs:
+            return
+        conn = self.pool.getconn()
+        failed = False
+        try:
+            with conn.cursor() as cur:
+                self._execute_log_insert(cur, logs)
+                cur.execute(
+                    """INSERT INTO system_config (key, value, updated_at)
+                       VALUES ('technitium_cursors', jsonb_build_object(%s::text, %s::bigint), NOW())
+                       ON CONFLICT (key) DO UPDATE
+                         SET value = COALESCE(system_config.value, '{}'::jsonb)
+                                     || jsonb_build_object(%s::text, %s::bigint),
+                             updated_at = NOW()""",
+                    [server_id, new_cursor, server_id, new_cursor]
+                )
+            conn.commit()
+            logger.debug("Technitium[%s] batch: inserted %d logs, cursor=%d", server_id, len(logs), new_cursor)
+        except Exception:
+            failed = True
+            conn.rollback()
+            raise
+        finally:
+            self.pool.putconn(conn, close=failed)
+
     # ── Retention cleanup ────────────────────────────────────────────────────
 
     RETENTION_BATCH_SIZE = 5_000
