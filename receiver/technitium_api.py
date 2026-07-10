@@ -10,6 +10,12 @@ independently with its own rowNumber cursor and connection status. Technitium
 returns the resolved answer inline in each record, so no separate DNS
 resolution step is needed; API tokens are non-expiring, so there is no
 session/SID handling.
+
+Compatible with Technitium DNS Server 15.x. Verified against a live 15.3
+server (2026-07-10): the /api/apps/list and /api/logs/query endpoints and the
+query-log record schema are unchanged, and blocked queries that return the
+sinkhole address inline (responseType=Blocked with an A answer) are already
+discarded by _parse_answer.
 """
 
 import ipaddress
