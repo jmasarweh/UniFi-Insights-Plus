@@ -66,19 +66,25 @@ def update_technitium_settings(body: dict):
                 'host': host,
                 'token': enc_token,
                 'verify_tls': bool(s.get('verify_tls', True)),
+                'app': (s.get('app') or '').strip(),
+                'cluster': bool(s.get('cluster', False)),
             })
             seen.add(sid)
 
         set_config(enricher_db, 'technitium_servers', new_servers)
 
-        # Drop cursors for removed servers and reset cursor when a host changed
+        # Drop cursors for removed servers and reset cursor when a host
+        # changed. Cluster-node cursors are keyed '<server-id>@<node>'.
         new_host_by_id = {x['id']: x['host'] for x in new_servers}
+
+        def keep_cursor(key):
+            base = key.split('@', 1)[0]
+            return base in seen and old_host_by_id.get(base) == new_host_by_id.get(base)
+
         cursors = get_config(enricher_db, 'technitium_cursors', {}) or {}
         if isinstance(cursors, dict):
-            set_config(enricher_db, 'technitium_cursors', {
-                k: v for k, v in cursors.items()
-                if k in seen and old_host_by_id.get(k) == new_host_by_id.get(k)
-            })
+            set_config(enricher_db, 'technitium_cursors',
+                       {k: v for k, v in cursors.items() if keep_cursor(k)})
         statuses = get_config(enricher_db, 'technitium_poll_status', {}) or {}
         if isinstance(statuses, dict):
             set_config(enricher_db, 'technitium_poll_status',
@@ -105,9 +111,11 @@ def test_technitium_connection(body: dict):
     host = (body.get('host') or '').strip()
     token = body.get('token') or ''
     verify = body.get('verify_tls', True)
+    app = (body.get('app') or '').strip()
+    cluster = bool(body.get('cluster', False))
 
     # Editing an existing server with a blank token → reuse the stored token
     if not token and body.get('id'):
         token = technitium_poller.token_for(body['id'])
 
-    return technitium_poller.test_connection(host, token, bool(verify))
+    return technitium_poller.test_connection(host, token, bool(verify), app=app, cluster=cluster)

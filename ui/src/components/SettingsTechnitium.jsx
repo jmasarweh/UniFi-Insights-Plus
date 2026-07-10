@@ -25,7 +25,9 @@ const ENRICHMENT_OPTIONS = [
 ]
 
 let _keySeq = 1
-const withKeys = (servers) => (servers || []).map(s => ({ ...s, token: '', _key: s.id || `new-${_keySeq++}` }))
+const withKeys = (servers) => (servers || []).map(s => ({
+  ...s, token: '', app: s.app || '', cluster: !!s.cluster, _key: s.id || `new-${_keySeq++}`,
+}))
 
 export default function SettingsTechnitium() {
   const [settings, setSettings] = useState(null)
@@ -35,6 +37,7 @@ export default function SettingsTechnitium() {
   const [testing, setTesting] = useState({})       // _key -> bool
   const [testResults, setTestResults] = useState({}) // _key -> {type,text}
   const [testPassed, setTestPassed] = useState({})  // _key -> bool
+  const [appOptions, setAppOptions] = useState({})  // _key -> [app names from last test]
   const [loadError, setLoadError] = useState(null)
   const saveTimerRef = useRef(null)
 
@@ -65,7 +68,7 @@ export default function SettingsTechnitium() {
 
   const addServer = () => setDraft(d => ({
     ...d,
-    servers: [...d.servers, { _key: `new-${_keySeq++}`, name: '', host: '', token: '', verify_tls: true, token_set: false }],
+    servers: [...d.servers, { _key: `new-${_keySeq++}`, name: '', host: '', token: '', verify_tls: true, app: '', cluster: false, token_set: false }],
   }))
 
   const removeServer = (key) => setDraft(d => ({
@@ -83,7 +86,8 @@ export default function SettingsTechnitium() {
     return draft.servers.some(s => {
       const o = orig.find(x => x.id === s.id)
       if (!o) return true // newly added
-      return s.host !== o.host || s.name !== o.name || s.verify_tls !== o.verify_tls || !!s.token
+      return s.host !== o.host || s.name !== o.name || s.verify_tls !== o.verify_tls
+        || (s.app || '') !== (o.app || '') || !!s.cluster !== !!o.cluster || !!s.token
     })
   }, [settings, draft])
 
@@ -102,15 +106,21 @@ export default function SettingsTechnitium() {
     try {
       const result = await testTechnitiumConnection({
         id: server.id, host: server.host, token: server.token, verify_tls: server.verify_tls,
+        app: server.app || '', cluster: !!server.cluster,
       })
+      if (Array.isArray(result.apps)) {
+        setAppOptions(a => ({ ...a, [server._key]: result.apps }))
+      }
       if (!result.success) {
         setTestResults(r => ({ ...r, [server._key]: { type: 'error', text: result.error || 'Connection failed' } }))
         setTestPassed(p => ({ ...p, [server._key]: false }))
       } else {
+        const nodes = Array.isArray(result.cluster_nodes) ? result.cluster_nodes : null
+        const nodeText = nodes ? ` — cluster: ${nodes.map(n => n.name).join(', ')}` : ''
         setTestResults(r => ({ ...r, [server._key]: {
           type: 'success',
           text: result.backend
-            ? `Connected — ${result.backend}${typeof result.total_queries === 'number' ? `, ${result.total_queries.toLocaleString()} queries` : ''}`
+            ? `Connected — ${result.backend}${typeof result.total_queries === 'number' ? `, ${result.total_queries.toLocaleString()} queries` : ''}${nodeText}`
             : 'Connection successful',
         } }))
         setTestPassed(p => ({ ...p, [server._key]: true }))
@@ -137,6 +147,8 @@ export default function SettingsTechnitium() {
             name: s.name || s.host,
             host: s.host,
             verify_tls: s.verify_tls,
+            app: s.app || '',
+            cluster: !!s.cluster,
             ...(s.token ? { token: s.token } : {}),
           })),
       })
@@ -176,7 +188,9 @@ export default function SettingsTechnitium() {
         </h2>
         <p className="text-sm text-gray-500 mb-3">
           Ingest DNS queries from one or more Technitium DNS Servers. The Query Logs backend
-          (Sqlite, MySQL, MariaDB, or PostgreSQL) is detected automatically per server.
+          (Sqlite, MySQL, MariaDB, or PostgreSQL) is detected automatically per server, or pick
+          a specific app when several are installed. For a Technitium cluster, add just one
+          node and enable cluster polling to pull every node's logs through it.
         </p>
 
         <div className="rounded-lg border border-gray-700 bg-gray-950">
@@ -242,6 +256,16 @@ export default function SettingsTechnitium() {
                     {st?.last_poll && (
                       <div className="text-xs text-gray-500 -mt-1">Last poll: {formatDate(st.last_poll)}{st.last_error ? ` — ${st.last_error}` : ''}</div>
                     )}
+                    {st?.nodes && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 -mt-1">
+                        {Object.entries(st.nodes).map(([node, ns]) => (
+                          <span key={node} className="flex items-center gap-1 text-xs text-gray-500" title={ns.last_error || ''}>
+                            <span className={`w-1.5 h-1.5 rounded-full block ${ns.connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                            {node}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
@@ -268,6 +292,36 @@ export default function SettingsTechnitium() {
                       <input type="password" value={s.token || ''} disabled={s.env_managed}
                         onChange={e => { updateServer(s._key, { token: e.target.value }); setTestPassed(p => ({ ...p, [s._key]: false })) }}
                         placeholder={s.token_set ? '(saved, leave blank to keep)' : 'Technitium API token'} className={INPUT_CLS} />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="flex items-center gap-1 text-xs text-gray-400 mb-1">
+                          Query Logs App
+                          <InfoTooltip>
+                            <p>Which Query Logs app to poll when more than one is installed (e.g. both Sqlite and PostgreSQL backends). <strong className="text-blue-300">Auto-detect</strong> uses the first one found. Run <strong className="text-blue-300">Test</strong> to populate this list from the server.</p>
+                          </InfoTooltip>
+                        </label>
+                        <select value={s.app || ''} disabled={s.env_managed}
+                          onChange={e => updateServer(s._key, { app: e.target.value })}
+                          className={INPUT_CLS}>
+                          <option value="">Auto-detect</option>
+                          {[...new Set([...(appOptions[s._key] || []), ...(s.app ? [s.app] : [])])].map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end pb-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={!!s.cluster} disabled={s.env_managed}
+                            onChange={e => { updateServer(s._key, { cluster: e.target.checked }); setTestPassed(p => ({ ...p, [s._key]: false })) }}
+                            className="w-4 h-4 rounded border-gray-600 bg-black text-teal-500 focus:ring-teal-500/40" />
+                          <span className="text-sm text-gray-300">Poll entire cluster</span>
+                          <InfoTooltip>
+                            <p>Pull query logs from <strong className="text-blue-300">every node</strong> of this server's Technitium cluster through this one server (Technitium 14+ with Clustering initialized). The token needs <strong className="text-blue-300">Administration: View</strong> permission. Each node keeps its own cursor.</p>
+                          </InfoTooltip>
+                        </label>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between flex-wrap gap-2">

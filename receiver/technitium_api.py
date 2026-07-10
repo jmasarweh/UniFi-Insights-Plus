@@ -16,6 +16,18 @@ server (2026-07-10): the /api/apps/list and /api/logs/query endpoints and the
 query-log record schema are unchanged, and blocked queries that return the
 sinkhole address inline (responseType=Blocked with an A answer) are already
 discarded by _parse_answer.
+
+Each server supports two optional settings:
+
+* ``app`` — the name of the Query Logs app to poll when more than one is
+  installed (e.g. both Sqlite and PostgreSQL backends). Empty = auto-detect
+  the first app that reports isQueryLogs=true.
+* ``cluster`` — when true, the server is treated as a gateway to its
+  Technitium cluster: the node list is fetched from /api/admin/cluster/state
+  and every reachable node's query logs are pulled through this one server
+  using the API's ``node`` proxy parameter (config, tokens, and app installs
+  are cluster-synced, so one token works for all nodes). Every node keeps an
+  independent rowNumber cursor, stored under the key ``<server-id>@<node>``.
 """
 
 import ipaddress
@@ -121,6 +133,8 @@ class TechnitiumPoller:
                     'host': (s.get('host') or '').rstrip('/'),
                     'token': decrypt_api_key(tok) if tok else '',
                     'verify_tls': bool(s.get('verify_tls', True)),
+                    'app': (s.get('app') or '').strip(),
+                    'cluster': bool(s.get('cluster', False)),
                     'env': False,
                 })
 
@@ -134,6 +148,8 @@ class TechnitiumPoller:
                 'host': legacy_host,
                 'token': decrypt_api_key(legacy_tok) if legacy_tok else '',
                 'verify_tls': bool(self._db.get_config('technitium_verify_tls', True)),
+                'app': '',
+                'cluster': False,
                 'env': False,
             })
 
@@ -147,6 +163,8 @@ class TechnitiumPoller:
                 'host': env_host.rstrip('/'),
                 'token': env_token,
                 'verify_tls': _env_verify_tls(),
+                'app': (os.environ.get('TECHNITIUM_APP') or '').strip(),
+                'cluster': os.environ.get('TECHNITIUM_CLUSTER', '').lower() in ('true', '1', 'yes'),
                 'env': True,
             })
 
@@ -205,7 +223,8 @@ class TechnitiumPoller:
     def reload_config(self):
         """Re-read settings from DB/env. Restart polling if changed."""
         old_enabled = self.enabled
-        old_hosts = {s['id']: s['host'] for s in self.servers}
+        old_hosts = {s['id']: (s['host'], s.get('app', ''), s.get('cluster', False))
+                     for s in self.servers}
 
         for sess in self._sessions.values():
             try:
@@ -218,7 +237,8 @@ class TechnitiumPoller:
         self._resolve_config()
         logger.info("Technitium config reloaded (enabled=%s, servers=%d)", self.enabled, len(self.servers))
 
-        new_hosts = {s['id']: s['host'] for s in self.servers}
+        new_hosts = {s['id']: (s['host'], s.get('app', ''), s.get('cluster', False))
+                     for s in self.servers}
         was_polling = self._poll_thread is not None and self._poll_thread.is_alive()
         if was_polling or (self.enabled and (old_enabled != self.enabled or old_hosts != new_hosts)):
             self.start_polling()
@@ -242,8 +262,10 @@ class TechnitiumPoller:
                     'host': s['host'],
                     'token_set': bool(s['token']),
                     'verify_tls': s['verify_tls'],
+                    'app': s.get('app', ''),
+                    'cluster': s.get('cluster', False),
                     'env_managed': s.get('env', False),
-                    'backend': (self._app_info.get(s['id']) or (None, None))[0],
+                    'backend': (self._app_info.get((s['id'], None)) or (None, None))[0],
                     'status': self._get_status(s['id']),
                 }
                 for s in self.servers
@@ -262,10 +284,13 @@ class TechnitiumPoller:
             return dict(db_status[sid])
         return {'connected': False, 'last_poll': None, 'last_error': None}
 
-    def _set_status(self, sid: str, connected: bool, error: str = None):
+    def _set_status(self, sid: str, connected: bool, error: str = None, nodes: dict = None):
         now = datetime.now(tz=timezone.utc).isoformat()
+        status = {'connected': connected, 'last_poll': now, 'last_error': error}
+        if nodes is not None:
+            status['nodes'] = nodes
         with self._lock:
-            self._statuses[sid] = {'connected': connected, 'last_poll': now, 'last_error': error}
+            self._statuses[sid] = status
             snapshot = dict(self._statuses)
         try:
             self._db.set_config('technitium_poll_status', snapshot)
@@ -285,9 +310,13 @@ class TechnitiumPoller:
             self._sessions[sid] = sess
         return sess
 
-    def _api_get(self, server: dict, path: str, params: dict) -> dict:
+    def _api_get(self, server: dict, path: str, params: dict, node: str = None) -> dict:
         query = dict(params)
         query['token'] = server['token']
+        if node:
+            # Cluster proxying: the contacted server forwards the call to the
+            # named node (requires Clustering to be initialized).
+            query['node'] = node
         url = f"{server['host']}{path}"
         session = self._get_session(server)
         try:
@@ -305,43 +334,92 @@ class TechnitiumPoller:
         return data
 
     @staticmethod
-    def _find_query_logs_app(apps) -> tuple[str, str] | None:
-        """Return (app_name, class_path) of the first app exposing query logs.
+    def _list_query_logs_apps(apps) -> list[tuple[str, str]]:
+        """Return (app_name, class_path) for every app exposing query logs.
 
         Works for any Query Logs backend (Sqlite, MySQL, MariaDB, PostgreSQL):
         all of them flag their DNS app with isQueryLogs=true.
         """
+        found = []
         for app in apps or []:
             for dns_app in app.get('dnsApps', []):
-                if dns_app.get('isQueryLogs'):
-                    return app.get('name'), dns_app.get('classPath')
-        return None
+                if dns_app.get('isQueryLogs') and dns_app.get('classPath'):
+                    found.append((app.get('name'), dns_app.get('classPath')))
+        return found
 
-    def _discover_app(self, server: dict) -> tuple[str, str]:
-        """Detect and cache the installed Query Logs app for a server."""
-        sid = server['id']
-        cached = self._app_info.get(sid)
+    @classmethod
+    def _find_query_logs_app(cls, apps, preferred: str = '') -> tuple[str, str] | None:
+        """Return the (app_name, class_path) to poll: the app named
+        ``preferred`` when set, otherwise the first Query Logs app found."""
+        candidates = cls._list_query_logs_apps(apps)
+        if preferred:
+            for name, class_path in candidates:
+                if name == preferred:
+                    return name, class_path
+            return None
+        return candidates[0] if candidates else None
+
+    def _discover_app(self, server: dict, node: str = None) -> tuple[str, str]:
+        """Detect and cache the Query Logs app to poll for a server (or a
+        specific cluster node reached through it)."""
+        key = (server['id'], node)
+        cached = self._app_info.get(key)
         if cached:
             return cached
-        data = self._api_get(server, '/api/apps/list', {})
+        data = self._api_get(server, '/api/apps/list', {}, node=node)
         resp = data.get('response', data)
-        info = self._find_query_logs_app(resp.get('apps', []))
-        if not info or not info[1]:
+        preferred = server.get('app') or ''
+        info = self._find_query_logs_app(resp.get('apps', []), preferred)
+        if not info:
+            if preferred:
+                available = [n for n, _ in self._list_query_logs_apps(resp.get('apps', []))]
+                raise RuntimeError(
+                    f"Configured Query Logs app '{preferred}' not found"
+                    + (f" (available: {', '.join(available)})" if available else
+                       " (no Query Logs app installed)"))
             raise RuntimeError("No Query Logs app installed (need Query Logs for "
                                "Sqlite, MySQL, MariaDB, or PostgreSQL)")
-        self._app_info[sid] = info
-        logger.info("Technitium[%s] using Query Logs app: %s (%s)", server['name'], info[0], info[1])
+        self._app_info[key] = info
+        logger.info("Technitium[%s%s] using Query Logs app: %s (%s)",
+                    server['name'], f"/{node}" if node else '', info[0], info[1])
         return info
 
-    def _fetch_page(self, server: dict, page: int) -> dict:
-        app_name, class_path = self._discover_app(server)
+    def _get_cluster_nodes(self, server: dict) -> list[str] | None:
+        """Return reachable cluster node names via this server, or None when
+        clustering is unavailable (not initialized, no Administration:View
+        permission, or a pre-clustering Technitium version)."""
+        try:
+            data = self._api_get(server, '/api/admin/cluster/state', {})
+        except Exception as e:
+            logger.warning("Technitium[%s] cluster state unavailable (%s); "
+                           "polling this server directly", server['name'], e)
+            return None
+        resp = data.get('response', data)
+        if not resp.get('clusterInitialized'):
+            logger.warning("Technitium[%s] cluster polling enabled but clustering is "
+                           "not initialized; polling this server directly", server['name'])
+            return None
+        nodes, skipped = [], []
+        for n in resp.get('nodes', []) or []:
+            name = n.get('name')
+            if not name:
+                continue
+            # 'Self' = the node answering the call; 'Connected' = healthy peer.
+            (nodes if n.get('state') in ('Self', 'Connected') else skipped).append(name)
+        if skipped:
+            logger.warning("Technitium[%s] skipping unreachable cluster nodes: %s",
+                           server['name'], ', '.join(skipped))
+        return nodes or None
+
+    def _fetch_page(self, server: dict, page: int, node: str = None) -> dict:
+        app_name, class_path = self._discover_app(server, node)
         return self._api_get(server, '/api/logs/query', {
             'classPath': class_path,
             'name': app_name,
             'pageNumber': page,
             'entriesPerPage': self.ENTRIES_PER_PAGE,
             'descending': 'true',
-        })
+        }, node=node)
 
     # ── Record Mapping ─────────────────────────────────────────────────────────
 
@@ -452,21 +530,24 @@ class TechnitiumPoller:
 
     # ── Polling ────────────────────────────────────────────────────────────────
 
-    def _poll_server(self, server: dict):
-        """Fetch + insert new query-log entries for a single server."""
+    def _poll_target(self, server: dict, node: str = None) -> tuple[bool, str | None]:
+        """Fetch + insert new query-log entries for one server (or one cluster
+        node reached through it). Returns (ok, error). Cursors are keyed by
+        server id alone, or ``<id>@<node>`` — each node has its own rowNumber
+        sequence, so cursors must never be shared across nodes."""
         sid = server['id']
-        name = server['name']
-        cursor = self._cursors.get(sid, 0)
+        cursor_key = f"{sid}@{node}" if node else sid
+        name = node or server['name']
+        cursor = self._cursors.get(cursor_key, 0)
         first_run = (cursor == 0)
         try:
-            data = self._fetch_page(server, 1)
+            data = self._fetch_page(server, 1, node)
             resp = data.get('response', data)
             entries = resp.get('entries', []) or []
             total_pages = int(resp.get('totalPages', 1) or 1)
 
             if not entries:
-                self._set_status(sid, True)
-                return
+                return True, None
 
             newest_row = entries[0].get('rowNumber', 0)
             if not first_run and newest_row < cursor:
@@ -500,7 +581,7 @@ class TechnitiumPoller:
                     if done or page >= total_pages or pages_fetched >= self.MAX_PAGES_PER_POLL:
                         break
                     page += 1
-                    nxt = self._fetch_page(server, page)
+                    nxt = self._fetch_page(server, page, node)
                     cur_entries = nxt.get('response', nxt).get('entries', []) or []
                     if not cur_entries:
                         break
@@ -510,8 +591,7 @@ class TechnitiumPoller:
                                    name, self.MAX_PAGES_PER_POLL * self.ENTRIES_PER_PAGE)
 
             if not new_entries:
-                self._set_status(sid, True)
-                return
+                return True, None
 
             logs = []
             for record in reversed(new_entries):
@@ -524,14 +604,36 @@ class TechnitiumPoller:
                                      name, parsed.get('dns_query', '?'), e)
                 logs.append(parsed)
 
-            self._db.insert_technitium_batch(logs, sid, max_row)
-            self._cursors[sid] = max_row
-            self._set_status(sid, True)
+            self._db.insert_technitium_batch(logs, cursor_key, max_row)
+            self._cursors[cursor_key] = max_row
             logger.info("Technitium[%s] poll: inserted %d queries (cursor=%d)", name, len(logs), max_row)
+            return True, None
 
         except Exception as e:
             logger.error("Technitium[%s] poll failed: %s", name, e)
-            self._set_status(sid, False, str(e))
+            return False, str(e)
+
+    def _poll_server(self, server: dict):
+        """Poll a single configured server: either directly, or — in cluster
+        mode — fan out to every reachable node through it."""
+        sid = server['id']
+        if server.get('cluster'):
+            nodes = self._get_cluster_nodes(server)
+            if nodes:
+                node_status = {}
+                for n in nodes:
+                    if self._poll_stop.is_set():
+                        return
+                    ok, err = self._poll_target(server, n)
+                    node_status[n] = {'connected': ok, 'last_error': err}
+                failures = {n: s['last_error'] for n, s in node_status.items() if not s['connected']}
+                error = '; '.join(f"{n}: {e}" for n, e in failures.items()) or None
+                self._set_status(sid, not failures, error, nodes=node_status)
+                return
+            # Cluster requested but unavailable — fall back to a direct poll
+            # (already logged inside _get_cluster_nodes).
+        ok, err = self._poll_target(server)
+        self._set_status(sid, ok, err)
 
     def poll(self):
         """Poll every configured, usable server in turn."""
@@ -589,9 +691,13 @@ class TechnitiumPoller:
 
     # ── Test Connection ──────────────────────────────────────────────────────
 
-    def test_connection(self, host: str, token: str, verify: bool = True) -> dict:
+    def test_connection(self, host: str, token: str, verify: bool = True,
+                        app: str = '', cluster: bool = False) -> dict:
         """Test a single Technitium server: connectivity, token, and that a
-        Query Logs app (any backend) is installed and queryable."""
+        Query Logs app is installed and queryable. When ``app`` is set, that
+        specific app must exist; when ``cluster`` is set, clustering must be
+        initialized and the reachable node list is returned. Always returns
+        the names of all installed Query Logs apps (for the UI dropdown)."""
         test_host = (host or '').rstrip('/')
         if not test_host or not token:
             return {'success': False, 'error': 'Host and API token are required'}
@@ -618,11 +724,16 @@ class TechnitiumPoller:
             err = _check_status(apps_data)
             if err:
                 return {'success': False, 'error': err}
-            info = self._find_query_logs_app(apps_data.get('response', {}).get('apps', []))
-            if not info or not info[1]:
-                return {'success': False,
+            candidates = self._list_query_logs_apps(apps_data.get('response', {}).get('apps', []))
+            available = [n for n, _ in candidates]
+            if not candidates:
+                return {'success': False, 'apps': [],
                         'error': 'No Query Logs app installed. Install one on the Technitium server '
                                  '(Apps > Store > Query Logs for Sqlite, MySQL, MariaDB, or PostgreSQL).'}
+            info = self._find_query_logs_app(apps_data.get('response', {}).get('apps', []), app or '')
+            if not info:
+                return {'success': False, 'apps': available,
+                        'error': f"Query Logs app '{app}' not found. Available: {', '.join(available)}"}
             app_name, class_path = info
 
             # 2) Verify we can actually query it
@@ -636,9 +747,30 @@ class TechnitiumPoller:
             data = resp.json()
             err = _check_status(data)
             if err:
-                return {'success': False, 'error': err}
+                return {'success': False, 'apps': available, 'error': err}
             total = data.get('response', {}).get('totalEntries', 0)
-            return {'success': True, 'total_queries': total, 'backend': app_name}
+            result = {'success': True, 'total_queries': total, 'backend': app_name, 'apps': available}
+
+            # 3) Cluster mode: verify clustering is initialized and list nodes
+            if cluster:
+                state_resp = session.get(f"{test_host}/api/admin/cluster/state",
+                                         params={'token': token}, timeout=self.TIMEOUT)
+                state_resp.raise_for_status()
+                state_data = state_resp.json()
+                err = _check_status(state_data)
+                if err:
+                    return {'success': False, 'apps': available,
+                            'error': f"Cluster polling: {err} (the token needs Administration: View permission)"}
+                state = state_data.get('response', {})
+                if not state.get('clusterInitialized'):
+                    return {'success': False, 'apps': available,
+                            'error': 'Cluster polling enabled, but clustering is not initialized '
+                                     'on this server (Administration > Cluster).'}
+                result['cluster_nodes'] = [
+                    {'name': n.get('name'), 'state': n.get('state')}
+                    for n in state.get('nodes', []) or [] if n.get('name')
+                ]
+            return result
         except requests.ConnectionError:
             return {'success': False, 'error': f'Cannot connect to {test_host}'}
         except requests.Timeout:
