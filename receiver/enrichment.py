@@ -918,7 +918,12 @@ class Enricher:
                 logger.debug("Policy-based action resolution failed for %s",
                              parsed.get('rule_name'), exc_info=True)
 
-        if src_remote and not dst_remote:
+        direction = parsed.get('direction')
+        if direction == 'outbound' and dst_remote:
+            ip_to_enrich = dst_ip
+        elif direction == 'inbound' and src_remote:
+            ip_to_enrich = src_ip
+        elif src_remote and not dst_remote:
             ip_to_enrich = src_ip
         elif dst_remote and not src_remote:
             ip_to_enrich = dst_ip

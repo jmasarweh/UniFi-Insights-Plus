@@ -799,6 +799,60 @@ class TestRDNSEnricherConcurrency:
             assert r == {'rdns': 'host-1.2.3.4.example.com'}
 
 
+# ── Remote IP selection ──────────────────────────────────────────────────────
+
+class TestEnricherRemoteIpSelection:
+    def _make_enricher(self, monkeypatch):
+        monkeypatch.setattr('enrichment.GeoIPEnricher', MagicMock)
+        monkeypatch.setattr('enrichment.AbuseIPDBEnricher', MagicMock)
+        enricher = Enricher(db=None)
+        enricher.geoip.lookup = MagicMock(return_value={})
+        enricher.rdns.lookup = MagicMock(return_value={})
+        return enricher
+
+    def test_outbound_ipv6_both_global_enriches_destination(self, monkeypatch):
+        enricher = self._make_enricher(monkeypatch)
+        parsed = {
+            'log_type': 'firewall',
+            'direction': 'outbound',
+            'src_ip': '2606:4700:4700::1111',
+            'dst_ip': '2001:4860:4860::8888',
+        }
+
+        enricher.enrich(parsed)
+
+        assert parsed['remote_ip'] == '2001:4860:4860::8888'
+        enricher.geoip.lookup.assert_called_once_with('2001:4860:4860::8888')
+
+    def test_inbound_ipv6_both_global_enriches_source(self, monkeypatch):
+        enricher = self._make_enricher(monkeypatch)
+        parsed = {
+            'log_type': 'firewall',
+            'direction': 'inbound',
+            'src_ip': '2001:4860:4860::8888',
+            'dst_ip': '2606:4700:4700::1111',
+        }
+
+        enricher.enrich(parsed)
+
+        assert parsed['remote_ip'] == '2001:4860:4860::8888'
+        enricher.geoip.lookup.assert_called_once_with('2001:4860:4860::8888')
+
+    def test_unknown_direction_both_global_preserves_source_fallback(self, monkeypatch):
+        enricher = self._make_enricher(monkeypatch)
+        parsed = {
+            'log_type': 'firewall',
+            'direction': 'unknown',
+            'src_ip': '2001:4860:4860::8888',
+            'dst_ip': '2606:4700:4700::1111',
+        }
+
+        enricher.enrich(parsed)
+
+        assert parsed['remote_ip'] == '2001:4860:4860::8888'
+        enricher.geoip.lookup.assert_called_once_with('2001:4860:4860::8888')
+
+
 # ── Enricher toggle gates (live + reload) ────────────────────────────────────
 
 class TestEnricherRdnsToggle:
