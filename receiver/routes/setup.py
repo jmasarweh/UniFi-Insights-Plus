@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from psycopg2.extras import RealDictCursor, Json
 
-from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key
+from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_time
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
 from unifi_api import UniFiAPI
 from firewall_policy_matcher import invalidate_cache as invalidate_fw_cache
@@ -50,6 +50,7 @@ def _prune_dismissed(config_key: str, configured_ifaces: set) -> None:
 @router.get("/api/config")
 def get_current_config():
     """Return current system configuration."""
+    from enrichment import _resolve_rdns_enabled
     return {
         "wan_interfaces": get_config(enricher_db, "wan_interfaces", ["ppp0"]),
         "interface_labels": get_config(enricher_db, "interface_labels", {}),
@@ -66,6 +67,10 @@ def get_current_config():
         # "nothing dismissed" and new VPNs trigger the toast again.
         "vpn_toast_dismissed": _read_dismissed_list("vpn_toast_dismissed"),
         **{k: get_config(enricher_db, k, v) for k, v in _UI_SETTINGS_DEFAULTS.items()},
+        # rdns_enabled is intentionally NOT in _UI_SETTINGS_DEFAULTS (UI's
+        # save-everything pattern would silently persist env-overridden values).
+        # Surface the effective value here so /api/config and /api/settings/rdns agree.
+        "rdns_enabled": _resolve_rdns_enabled(enricher_db),
         "mcp_enabled": get_config(enricher_db, "mcp_enabled", False),
         "mcp_audit_enabled": get_config(enricher_db, "mcp_audit_enabled", False),
         "mcp_audit_retention_days": get_config(enricher_db, "mcp_audit_retention_days", 10),
@@ -403,6 +408,7 @@ _UI_SETTINGS_DEFAULTS = {
     'ui_theme': 'dark',
     'ui_block_highlight': 'on',
     'ui_block_highlight_threshold': 0,
+    'ui_csv_export_unifi_raw_log': 'off',
     'wifi_processing_enabled': True,
     'system_processing_enabled': True,
 }
@@ -413,6 +419,7 @@ _UI_SETTINGS_VALID = {
     'ui_theme': {'dark', 'light'},
     'ui_block_highlight': {'on', 'off'},
     'ui_block_highlight_threshold': (0, 100),
+    'ui_csv_export_unifi_raw_log': {'on', 'off'},
     'wifi_processing_enabled': {True, False},
     'system_processing_enabled': {True, False},
 }
@@ -430,9 +437,12 @@ _EXPORTABLE_KEYS = [
     'wizard_path', 'unifi_enabled', 'unifi_host', 'unifi_site',
     'unifi_verify_ssl', 'unifi_poll_interval', 'unifi_features',
     'unifi_controller_name', 'unifi_controller_type',
-    'retention_days', 'dns_retention_days',
+    'retention_days', 'dns_retention_days', 'retention_time',
     'mcp_enabled', 'mcp_audit_enabled', 'mcp_audit_retention_days', 'mcp_allowed_origins',
     'auth_session_ttl_hours', 'audit_log_retention_days',
+    # rdns_enabled lives outside _UI_SETTINGS_DEFAULTS but should still
+    # round-trip via export/import.
+    'rdns_enabled',
     *_UI_SETTINGS_DEFAULTS.keys(),
 ]
 # NOTE: unifi_username, unifi_password, and unifi_site_id are NEVER exported
@@ -542,6 +552,19 @@ def import_config(body: dict):
             except (ValueError, TypeError):
                 failed_keys.append(key)
                 continue
+        elif key == 'retention_time':
+            parsed = parse_retention_time(val)
+            if parsed is None:
+                failed_keys.append(key)
+                continue
+            val = parsed
+        elif key == 'rdns_enabled':
+            from enrichment import _parse_bool_setting  # local import — see Phase 4.4 note
+            parsed = _parse_bool_setting(val, default=None)
+            if parsed is None:
+                failed_keys.append(key)
+                continue
+            val = parsed
         set_config(enricher_db, key, val)
         imported_keys.append(key)
 
@@ -654,12 +677,14 @@ def get_retention():
     try:
         ui_general = get_config(enricher_db, 'retention_days')
         ui_dns = get_config(enricher_db, 'dns_retention_days')
+        ui_time = get_config(enricher_db, 'retention_time')
     except Exception as exc:
         logger.error("Failed to read retention config from DB: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to read retention configuration") from exc
 
     env_general = os.environ.get('RETENTION_DAYS')
     env_dns = os.environ.get('DNS_RETENTION_DAYS')
+    env_time = os.environ.get('RETENTION_TIME')
 
     # Resolve effective values: UI > env > defaults
     if ui_general is not None:
@@ -692,15 +717,26 @@ def get_retention():
         dns = 10
         dns_source = 'default'
 
+    if ui_time is not None:
+        retention_time = ui_time
+        time_source = 'ui'
+    elif env_time:
+        retention_time = env_time
+        time_source = 'env'
+    else:
+        retention_time = RETENTION_TIME_DEFAULT
+        time_source = 'default'
+
     # Estimate log counts for slider steps (_estimate_log_counts handles its own errors)
     estimates = _estimate_log_counts()
 
     return {
-        'retention_days': general,
-        'dns_retention_days': dns,
-        'general_source': general_source,
-        'dns_source': dns_source,
-        'estimates': estimates,
+        'retention_days': days.general,
+        'dns_retention_days': days.dns,
+        'retention_time': time_cfg.time,
+        'general_source': days.general_source,
+        'dns_source': days.dns_source,
+        'time_source': time_cfg.source,
     }
 
 
@@ -728,6 +764,38 @@ def update_retention(body: dict):
             raise HTTPException(status_code=400, detail="dns_retention_days must be between 1 and 3650")
         set_config(enricher_db, 'dns_retention_days', dns_days)
 
+    raw_time = body.get('retention_time')
+    time_changed = False
+    if raw_time is not None:
+        parsed_time = parse_retention_time(raw_time)
+        if parsed_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail="retention_time must be a 'HH:MM' string in 00:00..23:59"
+            )
+        # Compare against the *effective* value (UI > env > default), not the
+        # raw DB key. The UI sends retention_time on every save (part of the
+        # combined dirty check), so a days-only edit always arrives with the
+        # current effective time in the payload.
+        #
+        # Comparing against get_config('retention_time') alone would treat
+        # env/default-sourced times as "not present in DB, needs writing",
+        # which silently flips the precedence source from env/default to ui
+        # and pins the current time against future env overrides. The
+        # resolver-based comparison only writes on a genuine user-initiated
+        # change.
+        effective = Database.resolve_retention_time(enricher_db).time
+        if effective != parsed_time:
+            set_config(enricher_db, 'retention_time', parsed_time)
+            time_changed = True
+
+    # Only signal the receiver when the *time* actually changes — days are
+    # re-resolved from the DB on every scheduled run, so they don't need a
+    # reload. Scheduler rebuild is an OS-level signal + SIGUSR2 handler chain,
+    # so avoiding no-op reloads keeps the system quiet.
+    if time_changed:
+        signal_receiver()
+
     return {"success": True}
 
 
@@ -750,8 +818,13 @@ def _cleanup_gc():
 
 
 def _resolve_retention_days():
-    """Return (general_days, dns_days) via the shared DB resolver."""
-    return enricher_db.resolve_retention_days()
+    """Return (general_days, dns_days) via the shared DB resolver.
+
+    Drops the source fields — callers in this module only need the integers.
+    The GET endpoint calls the full resolver directly.
+    """
+    cfg = Database.resolve_retention_days(enricher_db)
+    return (cfg.general, cfg.dns)
 
 
 def _run_cleanup_worker(general_days: int, dns_days: int):
@@ -992,41 +1065,6 @@ def get_purge_status():
         return {lt: dict(job) for lt, job in _purge_jobs.items()}
 
 
-def _estimate_log_counts() -> dict:
-    """Estimate total log count for each retention slider step.
-
-    Uses the average daily rate from the last 7 days to extrapolate.
-    Returns dict of {days_str: estimated_count}.
-    """
-    steps = [60, 120, 180, 270, 365]
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            # Get actual count and date range for last 7 days
-            cur.execute("""
-                SELECT COUNT(*),
-                       EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 86400.0
-                FROM logs
-                WHERE log_type != 'dns'
-                  AND timestamp >= NOW() - INTERVAL '7 days'
-            """)
-            row = cur.fetchone()
-            count_7d = row[0] or 0
-            span_days = row[1] or 0
-
-            if span_days < 0.5 or count_7d < 10:
-                # Not enough data to estimate
-                return {str(s): None for s in steps}
-
-            daily_rate = count_7d / span_days
-            return {str(s): int(daily_rate * s) for s in steps}
-    except Exception:
-        logger.debug("Failed to estimate log counts", exc_info=True)
-        return {str(s): None for s in steps}
-    finally:
-        put_conn(conn)
-
-
 # ── UI Settings (endpoints) ──────────────────────────────────────────────────
 
 @router.get("/api/settings/ui")
@@ -1063,4 +1101,64 @@ def update_ui_settings(body: dict):
     # Signal receiver to reload only when processing settings actually changed
     if actually_changed_processing:
         signal_receiver()
+    return {"success": True}
+
+
+# ── rDNS opt-out toggle (issue #98) ──────────────────────────────────────────
+# Dedicated route — kept out of /api/settings/ui because the UI panel saves
+# the entire settings object on any change, which would silently persist an
+# env-overridden value into system_config.
+
+@router.get("/api/settings/rdns")
+def get_rdns_settings():
+    """Return effective rdns_enabled, plus raw stored value and source.
+
+    `source` is 'env' ONLY when env is set to a recognised true/false token.
+    Blank or unrecognised env values fall through to DB/default and `source`
+    reflects that, so operators are not misled into thinking env is in
+    control when it isn't.
+
+    `stored_value` is None when no system_config row exists (distinct from
+    a stored False).
+    """
+    from enrichment import (
+        _resolve_rdns_enabled, _parse_bool_setting, _TRUE_TOKENS, _FALSE_TOKENS,
+    )
+    env = os.environ.get('RDNS_ENABLED')
+    env_token = env.strip().lower() if env is not None else None
+    env_recognised = env_token in _TRUE_TOKENS or env_token in _FALSE_TOKENS
+
+    raw = get_config(enricher_db, 'rdns_enabled', None)  # None → no row
+    stored = _parse_bool_setting(raw, default=None) if raw is not None else None
+    effective = _resolve_rdns_enabled(enricher_db)
+
+    if env_recognised:
+        source = 'env'
+    elif stored is not None:
+        source = 'system_config'
+    else:
+        source = 'default'
+
+    return {
+        'rdns_enabled': effective,   # what the receiver actually does
+        'stored_value': stored,      # None | True | False (None = no row)
+        'source': source,            # 'env' | 'system_config' | 'default'
+    }
+
+
+@router.put("/api/settings/rdns")
+def update_rdns_settings(body: dict):
+    """Persist rdns_enabled to system_config and signal receiver to reload."""
+    from enrichment import _parse_bool_setting
+    if 'rdns_enabled' not in body:
+        raise HTTPException(400, "Missing 'rdns_enabled' in body")
+    parsed = _parse_bool_setting(body['rdns_enabled'], default=None)
+    if parsed is None:
+        raise HTTPException(400, f"Invalid rdns_enabled value: {body['rdns_enabled']!r}")
+    # Compare against raw stored value (None-safe), not against default-coerced True
+    raw_current = get_config(enricher_db, 'rdns_enabled', None)
+    current = _parse_bool_setting(raw_current, default=None) if raw_current is not None else None
+    if parsed != current:
+        set_config(enricher_db, 'rdns_enabled', parsed)
+        signal_receiver()  # SIGUSR2 → enricher reloads via _resolve_rdns_enabled
     return {"success": True}

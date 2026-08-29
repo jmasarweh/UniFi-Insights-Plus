@@ -2,15 +2,15 @@
   <img src="ui/public/image.png" alt="UniFi Insights Plus" />
 </p>
 
-<h1 align="center">UniFi Insights Plus <a href="https://github.com/jmasarweh/Unifi-Log-Insights/stargazers"><img src="https://img.shields.io/github/stars/jmasarweh/Unifi-Log-Insights" alt="GitHub Stars" /></a></h1>
+<h1 align="center">UniFi Insights Plus <a href="https://github.com/jmasarweh/UniFi-Insights-Plus/stargazers"><img src="https://img.shields.io/github/stars/jmasarweh/UniFi-Insights-Plus" alt="GitHub Stars" /></a></h1>
 
 <p align="center">
-  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/releases/latest"><img src="https://img.shields.io/github/v/release/jmasarweh/Unifi-Log-Insights" alt="GitHub Release" /></a>
-  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/pkgs/container/unifi-log-insight"><img src="https://img.shields.io/badge/downloads-24k+-blue" alt="Downloads" /></a>
+  <a href="https://github.com/jmasarweh/UniFi-Insights-Plus/releases/latest"><img src="https://img.shields.io/github/v/release/jmasarweh/UniFi-Insights-Plus" alt="GitHub Release" /></a>
+  <a href="https://github.com/jmasarweh/UniFi-Insights-Plus/pkgs/container/unifi-log-insight"><img src="https://img.shields.io/badge/downloads-41k+-blue" alt="Downloads" /></a>
   <a href="https://chromewebstore.google.com/detail/unifi-insights-plus/dlpkbnjhbhkijfkgnmnbohbokdfoimge"><img src="https://img.shields.io/chrome-web-store/v/dlpkbnjhbhkijfkgnmnbohbokdfoimge?label=chrome-extension" alt="Chrome Web Store" /></a>
   <a href="https://addons.mozilla.org/en-US/firefox/addon/unifi-insights-plus/"><img src="https://img.shields.io/amo/v/unifi-insights-plus?label=firefox-addon" alt="Firefox Add-ons" /></a>
-  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/test.yml?branch=main&label=tests" alt="Tests" /></a>
-  <a href="https://github.com/jmasarweh/Unifi-Log-Insights/actions/workflows/docker-publish.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/Unifi-Log-Insights/docker-publish.yml?label=docker%20build" alt="Docker Build" /></a>
+  <a href="https://github.com/jmasarweh/UniFi-Insights-Plus/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/UniFi-Insights-Plus/test.yml?branch=main&label=tests" alt="Tests" /></a>
+  <a href="https://github.com/jmasarweh/UniFi-Insights-Plus/actions/workflows/docker-publish.yml"><img src="https://img.shields.io/github/actions/workflow/status/jmasarweh/UniFi-Insights-Plus/docker-publish.yml?label=docker%20build" alt="Docker Build" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSL%201.1-orange" alt="License" /></a>
 </p>
 
@@ -55,7 +55,7 @@
 | **Theming & Preferences** | Dark/light theme, country display format, IP subline (show ASN beneath IPs) |
 | **Interface Labels** | Color-coded labels for traffic flow, applied retroactively to all logs |
 | **CSV Export** | Download filtered results up to 100K rows |
-| **Retention** | Configurable per log type (60-day default, 10-day DNS). Adjustable via Settings or env vars |
+| **Retention** | Configurable per log type (60-day default, 10-day DNS) and cleanup time (HH:MM, container-local). Adjustable via Settings or env vars |
 | **Backup & Restore** | Export/import all settings as JSON |
 | **External DB Support** | Run against an external PostgreSQL instead of the embedded one — compatible with Coolify, Unraid, managed Postgres, and any platform where bundled databases aren't allowed. [Setup guide](https://insightsplus.dev/docs/external-database) · [Migration guide for existing users](https://github.com/jmasarweh/UniFi-Insights-Plus/wiki/External-PostgreSQL-Migration-Guide) |
 | **DNS Ready** | Full DNS query parsing ([requires configuration](https://insightsplus.dev/docs)) |

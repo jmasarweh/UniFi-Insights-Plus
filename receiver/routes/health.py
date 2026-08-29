@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from db import get_config, is_external_db
+from db import Database, get_config, is_external_db
 from enrichment import get_abuseipdb_stats
 from deps import get_conn, put_conn, enricher_db, APP_VERSION
 
@@ -41,15 +41,8 @@ def health():
             oldest, latest = cur.fetchone()
         conn.commit()
 
-        # Retention days: system_config > env > default
-        retention_val = get_config(enricher_db, 'retention_days')
-        if retention_val is not None:
-            retention_days = int(retention_val)
-        else:
-            try:
-                retention_days = int(os.environ.get('RETENTION_DAYS', '60'))
-            except (ValueError, TypeError):
-                retention_days = 60
+        # Retention days — shared resolver handles UI > env > default + validation.
+        retention_days = Database.resolve_retention_days(enricher_db).general
 
         # AbuseIPDB rate limit stats (written by receiver process)
         abuseipdb = get_abuseipdb_stats(enricher_db)
