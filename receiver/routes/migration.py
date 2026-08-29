@@ -40,6 +40,7 @@ _migration_state = {
 
 
 def _update_state(**kwargs):
+    """Thread-safely update the shared migration state dict."""
     with _migration_lock:
         _migration_state.update(kwargs)
 
@@ -47,6 +48,8 @@ def _update_state(**kwargs):
 # ── Request model ────────────────────────────────────────────────────────────
 
 class MigrationParams(BaseModel):
+    """Connection parameters for the target external PostgreSQL database."""
+
     host: str
     port: int = 5432
     dbname: str = 'unifi_logs'
@@ -56,6 +59,8 @@ class MigrationParams(BaseModel):
 
 
 class PatchComposeRequest(BaseModel):
+    """Request body for patching a docker-compose file with external DB env vars."""
+
     compose_yaml: str
     host: str
     port: int = 5432
@@ -67,6 +72,7 @@ class PatchComposeRequest(BaseModel):
 # ── Validation helpers ───────────────────────────────────────────────────────
 
 def _validate_target(params: MigrationParams):
+    """Raise 400 if the target DB params are missing or point to a local/system DB."""
     if not params.host.strip():
         raise HTTPException(400, "Host is required")
     if not params.dbname.strip():
@@ -80,6 +86,7 @@ def _validate_target(params: MigrationParams):
 
 
 def _connect_params(params: MigrationParams) -> dict:
+    """Build a psycopg2 connection kwargs dict from MigrationParams."""
     cp = {
         'host': params.host.strip(),
         'port': params.port,
@@ -125,6 +132,7 @@ def _host_connectivity_hint(host: str, port: int) -> str:
 
 @router.post("/api/migration/test-connection")
 def test_connection(params: MigrationParams):
+    """Test connectivity and version compatibility of the target PostgreSQL database."""
     _validate_target(params)
     cp = _connect_params(params)
     try:
@@ -169,6 +177,7 @@ def test_connection(params: MigrationParams):
 
 @router.post("/api/migration/start")
 def start_migration(params: MigrationParams):
+    """Start an async data migration to the specified external PostgreSQL database."""
     _validate_target(params)
     with _migration_lock:
         if _migration_state['status'] == 'running':
@@ -187,6 +196,7 @@ def start_migration(params: MigrationParams):
 
 @router.get("/api/migration/status")
 def migration_status():
+    """Return the current migration state (running/complete/failed) and progress."""
     with _migration_lock:
         state = dict(_migration_state)
     state['is_external'] = is_external_db()
@@ -385,6 +395,7 @@ def patch_compose(req: PatchComposeRequest):
 # ── Background migration runner ─────────────────────────────────────────────
 
 def _run_migration(params: MigrationParams):
+    """Background thread target: call _do_migration and catch unexpected exceptions."""
     try:
         _do_migration(params)
     except Exception as exc:
@@ -393,6 +404,7 @@ def _run_migration(params: MigrationParams):
 
 
 def _do_migration(params: MigrationParams):
+    """Execute the full pg_dump → restore migration and update progress state."""
     cp = _connect_params(params)
 
     # ── 5% Preflight: verify target is safe ──────────────────────────────
@@ -570,6 +582,7 @@ def _do_migration(params: MigrationParams):
 
 
 def _cleanup_dump(path: str):
+    """Delete the temporary pg_dump file, ignoring errors if it no longer exists."""
     try:
         os.remove(path)
     except OSError:

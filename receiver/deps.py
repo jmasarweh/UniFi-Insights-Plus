@@ -24,6 +24,7 @@ logger = logging.getLogger('api')
 # ── Version ──────────────────────────────────────────────────────────────────
 
 def _read_version():
+    """Read the VERSION file from the container or local path."""
     for path in ('/app/VERSION', 'VERSION'):
         try:
             with open(path) as f:
@@ -94,7 +95,7 @@ def put_conn(conn):
 
 # ── AbuseIPDB Enricher (for manual enrich endpoint) ─────────────────────────
 
-enricher_db = Database(conn_params, min_conn=1, max_conn=3)
+enricher_db = Database(conn_params, min_conn=2, max_conn=8)
 enricher_db.connect()
 abuseipdb = AbuseIPDBEnricher(db=enricher_db)
 
@@ -111,11 +112,13 @@ pihole_poller = PiHolePoller(db=enricher_db, enricher=None)
 def ttl_cache(seconds=30):
     """Thread-safe TTL cache for expensive endpoint results."""
     def decorator(fn):
+        """Wrap fn with a per-function TTL cache."""
         lock = threading.Lock()
         cached = {'result': None, 'expires': 0}
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            """Return cached result or call fn and cache the fresh result."""
             now = time.monotonic()
             if cached['result'] is not None and now < cached['expires']:
                 return cached['result']
