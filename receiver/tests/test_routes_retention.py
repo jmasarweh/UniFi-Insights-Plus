@@ -72,6 +72,8 @@ def client(monkeypatch):
     mock_db_module.Database.resolve_retention_days = MagicMock(return_value=default_days)
     mock_db_module.Database.resolve_retention_time = MagicMock(return_value=default_time)
     mock_db_module.Database.RETENTION_BATCH_SIZE = 5000
+    # Add this line:
+    mock_db_module.RETENTION_TIME_DEFAULT = '03:00'
     # Use the REAL parse_retention_time (imported at module top) so test and
     # production share one function — semantics can't drift.
     mock_db_module.parse_retention_time = _real_parse_retention_time
