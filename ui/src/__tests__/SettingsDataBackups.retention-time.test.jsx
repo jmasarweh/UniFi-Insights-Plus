@@ -67,12 +67,7 @@ describe('retention time input', () => {
     await screen.findByLabelText(/cleanup time/i)
 
     const timeInput = screen.getByLabelText(/cleanup time/i)
-    await screen.findByLabelText(/cleanup time/i)
-
-    const timeInput = screen.getByLabelText(/cleanup time/i)
     const saveBtn = screen.getByTestId('retention-save-button')
-
-    expect(saveBtn).toBeDisabled()
 
     expect(saveBtn).toBeDisabled()
 
