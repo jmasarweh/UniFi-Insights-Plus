@@ -1328,8 +1328,23 @@ END $$;""",
         """Get basic stats for health check / logging."""
         with self.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM logs")
-                total = cur.fetchone()[0]
+                # Use the pg_class catalog estimate instead of an exact
+                # COUNT(*) full scan. On large tables (tens of millions of
+                # rows) COUNT(*) takes minutes of heap I/O, holds a pooled
+                # connection for the duration, and — when this stats job runs
+                # every STATS_INTERVAL_MINUTES — can starve I/O and exhaust the
+                # connection pool. reltuples is maintained by autovacuum and is
+                # accurate to ~1% on active tables, which is more than enough
+                # for a logged/debug total. Mirrors the /api/health endpoint.
+                cur.execute("""
+                    SELECT COALESCE(GREATEST(c.reltuples::bigint, 0), 0)
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = 'logs'
+                      AND n.nspname = 'public'
+                """)
+                row = cur.fetchone()
+                total = row[0] if row else 0
                 cur.execute(
                     "SELECT log_type, COUNT(*) FROM logs "
                     "WHERE timestamp > NOW() - INTERVAL '1 hour' "
