@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from psycopg2.extras import RealDictCursor, Json
 
-from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_time, RETENTION_TIME_DEFAULT
+from db import Database, get_config, set_config, count_logs, encrypt_api_key, decrypt_api_key, parse_retention_time
 from deps import get_conn, put_conn, enricher_db, unifi_api, signal_receiver, APP_VERSION, ttl_cache
 from unifi_api import UniFiAPI
 from firewall_policy_matcher import invalidate_cache as invalidate_fw_cache
@@ -675,60 +675,11 @@ def save_vpn_networks(body: dict):
 def get_retention():
     """Return current retention configuration with effective values and source."""
     try:
-        ui_general = get_config(enricher_db, 'retention_days')
-        ui_dns = get_config(enricher_db, 'dns_retention_days')
-        ui_time = get_config(enricher_db, 'retention_time')
+        days = Database.resolve_retention_days(enricher_db)
+        time_cfg = Database.resolve_retention_time(enricher_db)
     except Exception as exc:
         logger.error("Failed to read retention config from DB: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to read retention configuration") from exc
-
-    env_general = os.environ.get('RETENTION_DAYS')
-    env_dns = os.environ.get('DNS_RETENTION_DAYS')
-    env_time = os.environ.get('RETENTION_TIME')
-
-    # Resolve effective values: UI > env > defaults
-    if ui_general is not None:
-        general = int(ui_general)
-        general_source = 'ui'
-    elif env_general:
-        try:
-            general = int(env_general)
-            general_source = 'env'
-        except ValueError:
-            logger.warning("Invalid RETENTION_DAYS env value: %r, using default", env_general)
-            general = 60
-            general_source = 'default'
-    else:
-        general = 60
-        general_source = 'default'
-
-    if ui_dns is not None:
-        dns = int(ui_dns)
-        dns_source = 'ui'
-    elif env_dns:
-        try:
-            dns = int(env_dns)
-            dns_source = 'env'
-        except ValueError:
-            logger.warning("Invalid DNS_RETENTION_DAYS env value: %r, using default", env_dns)
-            dns = 10
-            dns_source = 'default'
-    else:
-        dns = 10
-        dns_source = 'default'
-
-    if ui_time is not None:
-        retention_time = ui_time
-        time_source = 'ui'
-    elif env_time:
-        retention_time = env_time
-        time_source = 'env'
-    else:
-        retention_time = RETENTION_TIME_DEFAULT
-        time_source = 'default'
-
-    # Estimate log counts for slider steps (_estimate_log_counts handles its own errors)
-    estimates = _estimate_log_counts()
 
     return {
         'retention_days': days.general,
