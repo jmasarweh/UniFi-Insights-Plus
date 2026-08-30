@@ -18,6 +18,7 @@ import threading
 from collections import deque
 
 import schedule
+import psycopg2
 
 from parsers import parse_log
 import parsers
@@ -42,6 +43,22 @@ SYSLOG_BUFFER_SIZE = 8192      # Max UDP packet size
 BATCH_SIZE = 50                 # Insert logs in batches
 BATCH_TIMEOUT = 2.0             # Flush batch after N seconds even if not full
 STATS_INTERVAL_MINUTES = 15     # Log stats every N minutes
+RETENTION_INTERVAL_HOURS = 12   # Run retention cleanup every N hours
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var with safe fallback."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
+WAN_REFRESH_INTERVAL_MINUTES = _env_int('WAN_REFRESH_INTERVAL_MINUTES', 360)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +83,7 @@ class SyslogReceiver:
     HEARTBEAT_INTERVAL = 60  # Log heartbeat every 60 seconds
 
     def __init__(self, db: Database, enricher: Enricher):
+        """Create the receiver — does not open the socket until start() is called."""
         self.db = db
         self.enricher = enricher
         self.sock = None
@@ -256,6 +274,36 @@ def _refresh_network_identity_from_logs(db: Database):
         logger.error("Gateway IP detection failed: %s", e)
 
 
+def _log_periodic_stats(db: Database, enricher: Enricher):
+    """Collect and log stats only when DEBUG logging is enabled."""
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    db_stats = None
+    enrich_stats = None
+
+    try:
+        db_stats = db.get_stats()
+    except psycopg2.Error as e:
+        logger.error("Failed to get DB stats: %s", e)
+    except Exception as e:
+        # Last-resort safeguard: stats must never break scheduler loop.
+        logger.error("Failed to get DB stats (unexpected): %s", e)
+
+    try:
+        enrich_stats = enricher.get_stats()
+    except Exception as e:
+        # Last-resort safeguard: stats must never break scheduler loop.
+        logger.error("Failed to get enrichment stats (unexpected): %s", e)
+
+    try:
+        if db_stats is not None:
+            logger.debug("DB stats — total: %s, last hour: %s", db_stats['total'], db_stats['last_hour'])
+        if enrich_stats is not None:
+            logger.debug("Enrichment stats — %s", enrich_stats)
+    except (KeyError, TypeError) as e:
+        logger.error("Failed to log stats payload: %s", e)
+
+
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
 def _retention_cleanup(db: Database):
@@ -319,15 +367,25 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
     """Background thread for scheduled tasks (retention cleanup, stats, blacklist)."""
 
     def log_stats():
-        try:
-            db_stats = db.get_stats()
-            enrich_stats = enricher.get_stats()
-            logger.debug("DB stats — total: %s, last hour: %s", db_stats['total'], db_stats['last_hour'])
-            logger.debug("Enrichment stats — %s", enrich_stats)
-        except Exception as e:
-            logger.error("Failed to get stats: %s", e)
+        _log_periodic_stats(db, enricher)
 
+    def retention_cleanup():
+        """Delete logs older than the configured retention window."""
+        try:
+            general, dns = db.resolve_retention_days()
+            result = db.run_retention_cleanup(general, dns)
+            if result['status'] == 'partial':
+                logger.warning("Retention cleanup partial: %d deleted, error: %s",
+                               result['deleted_so_far'], result['error'])
+            elif result['status'] == 'failed':
+                logger.error("Retention cleanup failed: %s", result['error'])
+        except Exception as e:
+            logger.error("Retention cleanup failed: %s", e)
+
+        # Note: audit_log cleanup is handled by auth_cleanup() at 03:30.
+        # Legacy mcp_audit table no longer exists after migration to audit_log.
     def pull_blacklist():
+        """Fetch the latest IP blacklist and store it in the database."""
         if blacklist_fetcher:
             try:
                 blacklist_fetcher.fetch_and_store()
@@ -335,21 +393,26 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
                 logger.error("Blacklist pull failed: %s", e)
 
     def refresh_wan_ip():
+        """Refresh WAN/gateway identity from recent log data (no-op when UniFi is active)."""
         _refresh_network_identity_from_logs(db)
 
     schedule.every(STATS_INTERVAL_MINUTES).minutes.do(log_stats)
-    schedule.every(STATS_INTERVAL_MINUTES).minutes.do(refresh_wan_ip)
+    schedule.every(WAN_REFRESH_INTERVAL_MINUTES).minutes.do(refresh_wan_ip)
     _register_retention_job(db)
     schedule.every().day.at("04:00").do(pull_blacklist)
     # auth_cleanup has its own internal try/except — no wrapper needed here.
     schedule.every().day.at("03:30").do(auth_cleanup)
 
-    logger.info("Scheduler started — stats every %dm, blacklist daily at 04:00, auth cleanup daily at 03:30",
-                 STATS_INTERVAL_MINUTES)
+    logger.info("Scheduler started — stats every %dm, WAN refresh every %dm, blacklist daily at 04:00, auth cleanup daily at 03:30",
+                 STATS_INTERVAL_MINUTES, WAN_REFRESH_INTERVAL_MINUTES)
 
     # Initial blacklist pull after 30s startup delay
     time.sleep(30)
     pull_blacklist()
+
+    # Run retention cleanup once at startup so the first cleanup does not have
+    # to wait until the scheduled daily window before executing.
+    _retention_cleanup(db)
 
     while True:
         _scheduler_tick(db)
@@ -359,6 +422,7 @@ def run_scheduler(db: Database, enricher: Enricher, blacklist_fetcher: Blacklist
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Entrypoint: initialise the database, enricher, and syslog receiver."""
     # Build connection params from environment
     conn_params = build_conn_params()
     logger.info("Database: %s mode (host=%s:%s, db=%s)",
@@ -431,6 +495,7 @@ def main():
 
     # Handle graceful shutdown
     def shutdown(signum, frame):
+        """Handle SIGTERM/SIGINT: flush pending logs and exit cleanly."""
         logger.info("Received signal %d, shutting down...", signum)
         receiver.stop()
         adguard_poller.stop()
@@ -442,6 +507,7 @@ def main():
 
     # Handle GeoIP database reload
     def reload_geoip(signum, frame):
+        """Handle SIGUSR1: hot-reload GeoIP databases without restarting."""
         logger.info("Received SIGUSR1, reloading GeoIP databases...")
         enricher.reload_geoip()
 

@@ -674,15 +674,54 @@ def save_vpn_networks(body: dict):
 @router.get("/api/config/retention")
 def get_retention():
     """Return current retention configuration with effective values and source."""
-    days = Database.resolve_retention_days(enricher_db)
+    try:
+        ui_general = get_config(enricher_db, 'retention_days')
+        ui_dns = get_config(enricher_db, 'dns_retention_days')
+    except Exception as exc:
+        logger.error("Failed to read retention config from DB: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to read retention configuration") from exc
+
+    env_general = os.environ.get('RETENTION_DAYS')
+    env_dns = os.environ.get('DNS_RETENTION_DAYS')
+
+    if ui_general is not None:
+        general = int(ui_general)
+        general_source = 'ui'
+    elif env_general:
+        try:
+            general = int(env_general)
+            general_source = 'env'
+        except ValueError:
+            logger.warning("Invalid RETENTION_DAYS env value: %r, using default", env_general)
+            general = 60
+            general_source = 'default'
+    else:
+        general = 60
+        general_source = 'default'
+
+    if ui_dns is not None:
+        dns = int(ui_dns)
+        dns_source = 'ui'
+    elif env_dns:
+        try:
+            dns = int(env_dns)
+            dns_source = 'env'
+        except ValueError:
+            logger.warning("Invalid DNS_RETENTION_DAYS env value: %r, using default", env_dns)
+            dns = 10
+            dns_source = 'default'
+    else:
+        dns = 10
+        dns_source = 'default'
+
     time_cfg = Database.resolve_retention_time(enricher_db)
 
     return {
-        'retention_days': days.general,
-        'dns_retention_days': days.dns,
+        'retention_days': general,
+        'dns_retention_days': dns,
         'retention_time': time_cfg.time,
-        'general_source': days.general_source,
-        'dns_source': days.dns_source,
+        'general_source': general_source,
+        'dns_source': dns_source,
         'time_source': time_cfg.source,
     }
 
@@ -779,6 +818,7 @@ def _run_cleanup_worker(general_days: int, dns_days: int):
     global _cleanup_job
 
     def on_progress(state):
+        """Update the shared cleanup job state with the latest batch progress."""
         with _cleanup_lock:
             if _cleanup_job:
                 _cleanup_job.update(
@@ -875,6 +915,7 @@ _purge_lock = threading.Lock()
 
 
 def _now_ts():
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 

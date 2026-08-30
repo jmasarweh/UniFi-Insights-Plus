@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: jmasarweh/unifi-log-insight
+  IMAGE_NAME: leto1210/unifi-log-insights
 
 permissions:
   contents: read
@@ -112,6 +112,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES: ${{ steps.release.outputs.notes }}
         run: |
-          gh api --method PATCH /user/packages/container/unifi-log-insight \
+          gh api --method PATCH /user/packages/container/unifi-log-insights \
             -f description="$(printf '%s' "$RELEASE_NOTES" | head -c 512)" \
             2>/dev/null || true

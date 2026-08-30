@@ -440,7 +440,7 @@ export default function SettingsWanNetworks({ unifiEnabled, unifiSettings, wanCa
             <p className="text-sm text-yellow-400/90">
               L2TP, Site Magic, and OpenVPN Client detection is based on tentative interface prefixes not yet confirmed on real gateways.
               If detection is incorrect, please report your interface names and prefix on{' '}
-              <a href="https://github.com/jmasarweh/unifi-log-insight/issues" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">GitHub</a> or{' '}
+              <a href="https://github.com/leto1210/Unifi-Log-Insights/issues" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">GitHub</a> or{' '}
               <a href="https://www.reddit.com/r/Ubiquiti/comments/1r1wih9/an_enhanced_flow_insights_for_unifi_routers_geoip/" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">r/Ubiquiti</a> or{' '}
               <a href="https://www.reddit.com/r/UNIFI/comments/1r1wmyv/an_enhanced_flow_insights_for_unifi_routers_geoip/" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">r/Unifi</a>.
             </p>

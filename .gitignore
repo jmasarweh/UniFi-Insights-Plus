@@ -67,3 +67,6 @@ receiver/pentest_cleanup.py
 receiver/tests/test_uli_pentest_helpers.py
 receiver/tests/test_config_import_types.py
 docs/pentest-agent-harness.md
+
+# Notes de travail locales (lessons.md, snapshots de diagnostic) — non versionnées
+tasks/

@@ -1,10 +1,6 @@
 name: Sync Wiki
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'docs/wiki/**'
   workflow_dispatch:
 
 jobs:

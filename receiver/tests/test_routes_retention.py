@@ -72,6 +72,8 @@ def client(monkeypatch):
     mock_db_module.Database.resolve_retention_days = MagicMock(return_value=default_days)
     mock_db_module.Database.resolve_retention_time = MagicMock(return_value=default_time)
     mock_db_module.Database.RETENTION_BATCH_SIZE = 5000
+    # Add this line:
+    mock_db_module.RETENTION_TIME_DEFAULT = '03:00'
     # Use the REAL parse_retention_time (imported at module top) so test and
     # production share one function — semantics can't drift.
     mock_db_module.parse_retention_time = _real_parse_retention_time
@@ -100,14 +102,18 @@ def client(monkeypatch):
 
 
 class TestRetentionCleanupStart:
+    """Tests for POST /api/config/retention/cleanup."""
+
     def test_start_cleanup_returns_running(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Starting a cleanup returns 200 with status='running'."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         # Make run_retention_cleanup block until we release it
         started = threading.Event()
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until the release event is set, then return a complete result."""
             started.set()
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
@@ -128,11 +134,13 @@ class TestRetentionCleanupStart:
         started.wait(timeout=2)
 
     def test_start_cleanup_409_when_already_running(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """A second POST while a cleanup is running returns 409."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until released."""
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': None}
@@ -149,7 +157,8 @@ class TestRetentionCleanupStart:
         release.set()
 
     def test_start_cleanup_400_on_invalid_days(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Invalid retention days raise 400 before the job is started."""
+        test_client, _mock_deps, mock_db, _setup_mod = client
 
         mock_db.Database.validate_retention_days.side_effect = ValueError("must be positive")
 
@@ -159,19 +168,24 @@ class TestRetentionCleanupStart:
 
 
 class TestRetentionCleanupStatus:
+    """Tests for GET /api/config/retention/cleanup-status."""
+
     def test_status_idle_when_no_job(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Status is 'idle' when no cleanup has been triggered."""
+        test_client, _mock_deps, _mock_db, _setup_mod = client
 
         resp = test_client.get('/api/config/retention/cleanup-status')
         assert resp.status_code == 200
         assert resp.json()['status'] == 'idle'
 
     def test_status_shows_running_job(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Status endpoint reflects 'running' while a cleanup is in progress."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         release = threading.Event()
 
         def slow_cleanup(*args, **kwargs):
+            """Block until released."""
             release.wait(timeout=5)
             return {'status': 'complete', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': None}
@@ -189,9 +203,11 @@ class TestRetentionCleanupStatus:
         release.set()
 
     def test_status_shows_complete(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Status transitions to 'complete' with correct row counts after a successful run."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def fast_cleanup(*args, **kwargs):
+            """Return a complete result immediately."""
             return {'status': 'complete', 'dns_deleted': 50, 'non_dns_deleted': 100,
                     'deleted_so_far': 150, 'batches_completed': 2, 'error': None}
 
@@ -207,9 +223,11 @@ class TestRetentionCleanupStatus:
         assert data['non_dns_deleted'] == 100
 
     def test_status_shows_partial(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Status shows 'partial' with an error message when cleanup aborted mid-run."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def partial_cleanup(*args, **kwargs):
+            """Return a partial result with an error."""
             return {'status': 'partial', 'dns_deleted': 25, 'non_dns_deleted': 0,
                     'deleted_so_far': 25, 'batches_completed': 1, 'error': 'db error'}
 
@@ -223,9 +241,11 @@ class TestRetentionCleanupStatus:
         assert data['error'] == 'db error'
 
     def test_status_shows_failed(self, client):
-        test_client, mock_deps, mock_db, setup_mod = client
+        """Status shows 'failed' with an error message when cleanup raises an exception."""
+        test_client, mock_deps, mock_db, _setup_mod = client
 
         def failed_cleanup(*args, **kwargs):
+            """Return a failed result."""
             return {'status': 'failed', 'dns_deleted': 0, 'non_dns_deleted': 0,
                     'deleted_so_far': 0, 'batches_completed': 0, 'error': 'connection lost'}
 
@@ -238,7 +258,51 @@ class TestRetentionCleanupStatus:
         assert data['error'] == 'connection lost'
 
 
-class TestRetentionConfigGet:
+class TestGetRetentionConfig:
+    """Tests for GET /api/config/retention."""
+
+    def test_returns_defaults_when_no_config(self, client):
+        """Returns the built-in defaults when no config is saved in the DB."""
+        test_client, _mock_deps, mock_db, _setup_mod = client
+
+        mock_db.get_config.return_value = None
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['retention_days'] == 60
+        assert data['dns_retention_days'] == 10
+        assert data['general_source'] == 'default'
+        assert data['dns_source'] == 'default'
+
+    def test_returns_db_values_when_set(self, client):
+        """Returns the saved DB values and marks source as 'ui'."""
+        test_client, _mock_deps, mock_db, _setup_mod = client
+
+        def get_config_side_effect(db, key, default=None):
+            """Return saved retention values for known keys."""
+            return {'retention_days': 7, 'dns_retention_days': 3}.get(key)
+
+        mock_db.get_config.side_effect = get_config_side_effect
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data['retention_days'] == 7
+        assert data['dns_retention_days'] == 3
+        assert data['general_source'] == 'ui'
+        assert data['dns_source'] == 'ui'
+
+    def test_returns_500_on_db_failure(self, client):
+        """Returns 500 with an informative detail message when the DB call fails."""
+        test_client, _mock_deps, mock_db, _setup_mod = client
+
+        mock_db.get_config.side_effect = Exception("connection refused")
+
+        resp = test_client.get('/api/config/retention')
+        assert resp.status_code == 500
+        assert 'retention configuration' in resp.json()['detail']
+
     def test_get_includes_retention_time_default(self, client):
         test_client, mock_deps, mock_db, setup_mod = client
         # Fixture default: ('03:00', 'default'). No env dependence — the resolver is mocked.
@@ -308,7 +372,6 @@ class TestRetentionConfigPost:
         from types import SimpleNamespace
         test_client, mock_deps, mock_db, _ = client
 
-        # Effective value is '05:17' (regardless of source — UI, env, or default)
         mock_db.Database.resolve_retention_time.return_value = SimpleNamespace(
             time='05:17', source='ui')
 
@@ -333,15 +396,12 @@ class TestRetentionConfigPost:
         from types import SimpleNamespace
         test_client, mock_deps, mock_db, _ = client
 
-        # Effective time is '23:17' from env (system_config row absent).
         mock_db.Database.resolve_retention_time.return_value = SimpleNamespace(
             time='23:17', source='env')
-        # get_config('retention_time') returns None — nothing in DB.
-        # (Fixture default already has get_config returning None for all keys.)
 
         resp = test_client.post('/api/config/retention', json={
-            'retention_days': 30,           # days-only edit
-            'retention_time': '23:17',      # UI echoes the effective env value
+            'retention_days': 30,
+            'retention_time': '23:17',
         })
         assert resp.status_code == 200
         mock_deps.signal_receiver.assert_not_called()

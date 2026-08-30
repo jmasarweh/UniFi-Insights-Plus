@@ -20,11 +20,11 @@
 #
 # When DB_HOST is anything other than localhost, the embedded PostgreSQL
 # is automatically disabled and the container runs in external DB mode.
-# See https://insightsplus.dev/docs/external-database
+# See https://github.com/leto1210/Unifi-Log-Insights/wiki/External-PostgreSQL-Migration-Guide
 
 services:
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     pull_policy: always
     container_name: unifi-log-insight
     restart: unless-stopped
@@ -54,6 +54,7 @@ services:
       # Core settings
       TZ: ${TZ:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WAN_REFRESH_INTERVAL_MINUTES: ${WAN_REFRESH_INTERVAL_MINUTES:-360}
 
       # Optional: threat intelligence
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
