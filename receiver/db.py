@@ -682,6 +682,27 @@ END $$;""",
             )""",
             """CREATE INDEX IF NOT EXISTS idx_rdns_cache_looked_up_at
                 ON rdns_cache (looked_up_at)""",
+            # ── Autovacuum tuning for the high-churn logs table ──────────
+            # Default scale_factor=0.2 triggers autovacuum only after 20 % of
+            # rows are dead — on a 33 M-row table that is 6.6 M dead tuples.
+            # Lower thresholds ensure autovacuum fires promptly after batch
+            # retention deletes. ALTER TABLE logs SET is idempotent: safe to
+            # re-apply on every boot (no IF NOT EXISTS equivalent needed).
+            """ALTER TABLE logs SET (
+                autovacuum_vacuum_scale_factor  = 0.01,
+                autovacuum_vacuum_cost_delay    = 2,
+                autovacuum_analyze_scale_factor = 0.02,
+                autovacuum_vacuum_cost_limit    = 10000
+            )""",
+            # Log autovacuum runs that exceed 60 s so operators can verify
+            # the tuned scale_factor is firing after large retention cleanups.
+            # Requires ALTER DATABASE privilege — skipped silently if missing.
+            """DO $$ BEGIN
+                EXECUTE format(
+                    'ALTER DATABASE %I SET log_autovacuum_min_duration = ''60000''',
+                    current_database()
+                );
+            END $$""",
         ]
         try:
             with self.get_conn() as conn:
@@ -1069,6 +1090,10 @@ END $$;""",
     VACUUM_TIMEOUT_SECS = 300
     # Number of times to retry a transient VACUUM failure before giving up.
     # Does not retry on query-cancelled (timeout) — those are intentional aborts.
+    # In pathological cases (table too large to vacuum within VACUUM_TIMEOUT_SECS)
+    # the tuned autovacuum scale_factor in init.sql handles dead-tuple reclaim.
+    # Monitor pg_stat_user_tables.n_dead_tup post-deploy to verify autovacuum
+    # is keeping up when explicit VACUUM is skipped.
     VACUUM_MAX_RETRIES = 2
 
     @staticmethod
@@ -1290,7 +1315,8 @@ END $$;""",
                 with vac_conn.cursor() as cur:
                     # Enforce a hard timeout so a blocked VACUUM cannot stall
                     # the next cleanup cycle or hold a connection indefinitely.
-                    cur.execute(f"SET statement_timeout = '{self.VACUUM_TIMEOUT_SECS}s'")
+                    cur.execute("SET statement_timeout = %s",
+                                [f"{self.VACUUM_TIMEOUT_SECS}s"])
                     cur.execute("VACUUM ANALYZE logs")
                 logger.info("Post-cleanup VACUUM ANALYZE complete (attempt %d/%d)",
                             attempt, self.VACUUM_MAX_RETRIES)
@@ -1304,7 +1330,7 @@ END $$;""",
                     self.VACUUM_TIMEOUT_SECS, attempt,
                 )
                 return
-            except Exception as exc:
+            except psycopg2.Error as exc:
                 logger.warning(
                     "Post-cleanup VACUUM ANALYZE failed on attempt %d/%d: %s",
                     attempt, self.VACUUM_MAX_RETRIES, exc,
@@ -1321,8 +1347,8 @@ END $$;""",
                 if vac_conn:
                     try:
                         vac_conn.close()
-                    except Exception:
-                        pass  # ignore close errors
+                    except psycopg2.Error as close_exc:
+                        logger.debug("Error closing VACUUM connection: %s", close_exc)
 
     def get_stats(self) -> dict:
         """Get basic stats for health check / logging."""
