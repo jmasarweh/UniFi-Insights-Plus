@@ -15,7 +15,7 @@ const RETENTION_PRESETS = [30, 60, 90, 120, 180, 365]
 const RETENTION_TIME_DEFAULT = '03:00'  // matches backend default in db.py resolve_retention_time
 const DISK_CRITICAL_BYTES = 512 * 1024 * 1024       // 512 MB
 const DISK_WARNING_BYTES  = 2 * 1024 * 1024 * 1024  // 2 GB
-const EXTERNAL_DB_WIKI_URL = 'https://github.com/jmasarweh/unifi-log-insight/wiki/External-PostgreSQL-Migration-Guide'
+const EXTERNAL_DB_WIKI_URL = 'https://github.com/leto1210/Unifi-Log-Insights/wiki/External-PostgreSQL-Migration-Guide'
 
 function formatBytes(bytes) {
   if (bytes == null) return '—'

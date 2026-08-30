@@ -1,6 +1,6 @@
 # UniFi Log Insight Wiki
 
-Welcome to the UniFi Log Insight wiki. These guides cover advanced topics beyond the main [README](https://github.com/jmasarweh/unifi-log-insight#readme).
+Welcome to the UniFi Log Insight wiki. These guides cover advanced topics beyond the main [README](https://github.com/leto1210/Unifi-Log-Insights#readme).
 
 ## Guides
 
@@ -10,8 +10,8 @@ Welcome to the UniFi Log Insight wiki. These guides cover advanced topics beyond
 
 | | |
 |---|---|
-| [Quick Start](https://github.com/jmasarweh/unifi-log-insight#-quick-start) | Get up and running in minutes |
-| [Configuration Reference](https://github.com/jmasarweh/unifi-log-insight#%EF%B8%8F-configuration-reference) | Environment variables and options |
-| [Troubleshooting](https://github.com/jmasarweh/unifi-log-insight#-troubleshooting) | Common issues and fixes |
-| [Releases](https://github.com/jmasarweh/unifi-log-insight/releases) | Changelog and downloads |
-| [Report an Issue](https://github.com/jmasarweh/unifi-log-insight/issues) | Bug reports and feature requests |
+| [Quick Start](https://github.com/leto1210/Unifi-Log-Insights#-quick-start) | Get up and running in minutes |
+| [Configuration Reference](https://github.com/leto1210/Unifi-Log-Insights#%EF%B8%8F-configuration-reference) | Environment variables and options |
+| [Troubleshooting](https://github.com/leto1210/Unifi-Log-Insights#-troubleshooting) | Common issues and fixes |
+| [Releases](https://github.com/leto1210/Unifi-Log-Insights/releases) | Changelog and downloads |
+| [Report an Issue](https://github.com/leto1210/Unifi-Log-Insights/issues) | Bug reports and feature requests |
