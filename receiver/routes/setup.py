@@ -677,16 +677,13 @@ def get_retention():
     try:
         ui_general = get_config(enricher_db, 'retention_days')
         ui_dns = get_config(enricher_db, 'dns_retention_days')
-        ui_time = get_config(enricher_db, 'retention_time')
     except Exception as exc:
         logger.error("Failed to read retention config from DB: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to read retention configuration") from exc
 
     env_general = os.environ.get('RETENTION_DAYS')
     env_dns = os.environ.get('DNS_RETENTION_DAYS')
-    env_time = os.environ.get('RETENTION_TIME')
 
-    # Resolve effective values: UI > env > defaults
     if ui_general is not None:
         general = int(ui_general)
         general_source = 'ui'
@@ -717,25 +714,14 @@ def get_retention():
         dns = 10
         dns_source = 'default'
 
-    if ui_time is not None:
-        retention_time = ui_time
-        time_source = 'ui'
-    elif env_time:
-        retention_time = env_time
-        time_source = 'env'
-    else:
-        retention_time = RETENTION_TIME_DEFAULT
-        time_source = 'default'
-
-    # Estimate log counts for slider steps (_estimate_log_counts handles its own errors)
-    estimates = _estimate_log_counts()
+    time_cfg = Database.resolve_retention_time(enricher_db)
 
     return {
-        'retention_days': days.general,
-        'dns_retention_days': days.dns,
+        'retention_days': general,
+        'dns_retention_days': dns,
         'retention_time': time_cfg.time,
-        'general_source': days.general_source,
-        'dns_source': days.dns_source,
+        'general_source': general_source,
+        'dns_source': dns_source,
         'time_source': time_cfg.source,
     }
 

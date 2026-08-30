@@ -229,7 +229,7 @@ export default function SettingsOverlay({ onClose, startInReconfig, initialSecti
         </div>
         <div className="flex items-center gap-1">
           <a
-            href="https://insightsplus.dev/docs"
+            href="https://github.com/leto1210/Unifi-Log-Insights/wiki"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-sm text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"

@@ -191,6 +191,8 @@ class RetentionTimeConfig(NamedTuple):
     source: str  # 'ui' | 'env' | 'default'
 
 
+RETENTION_TIME_DEFAULT = '03:00'
+
 # Module-level flag so the legacy RETENTION_TIME deprecation warning fires
 # once per process, not on every resolver call (the resolver runs on every
 # GET /api/config/retention and every SIGUSR2 scheduler rebuild).
@@ -1165,7 +1167,7 @@ END $$;""",
                 _legacy_retention_time_warned = True
             return RetentionTimeConfig(legacy, 'env')
 
-        return RetentionTimeConfig('03:00', 'default')
+        return RetentionTimeConfig(RETENTION_TIME_DEFAULT, 'default')
 
     def run_retention_cleanup(self, general_days: int = 60, dns_days: int = 10,
                               progress_cb=None) -> dict:

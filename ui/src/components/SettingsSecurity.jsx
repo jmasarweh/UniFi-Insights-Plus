@@ -243,14 +243,14 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                     <p className="font-medium text-blue-300">Before enabling authentication, please read:</p>
                     <ul className="mt-1.5 list-disc list-inside space-y-1">
                       <li>
-                        <a href="https://insightsplus.dev/docs/authentication" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors">
+                        <a href="https://github.com/leto1210/Unifi-Log-Insights/wiki" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors">
                           Authentication guide
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                         </a>
                         {' '}&mdash; HTTPS/proxy requirements, session management, API tokens
                       </li>
                       <li>
-                        <a href="https://insightsplus.dev/docs/browser-extension" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors">
+                        <a href="https://github.com/leto1210/Unifi-Log-Insights/wiki" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors">
                           Browser extension setup
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                         </a>
@@ -321,7 +321,7 @@ export default function SettingsSecurity({ onAuthEnabled }) {
 
                       <p className="text-sm text-gray-500">
                         Add the header to your reverse proxy config, then refresh this page.{' '}
-                        <a href="https://insightsplus.dev/docs/authentication#reverse-proxy" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-300 transition-colors">
+                        <a href="https://github.com/leto1210/Unifi-Log-Insights/wiki" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-300 transition-colors">
                           Full guide
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                         </a>
@@ -546,7 +546,7 @@ export default function SettingsSecurity({ onAuthEnabled }) {
                       </svg>
                       <p className="text-sm text-yellow-400/90">
                         <strong>Nginx Proxy Manager:</strong> Use <strong>Custom Locations</strong> (not the Advanced tab). Add a <span className="font-mono">/</span> location and paste the header line above. The Advanced tab places headers at server level, which nginx silently drops when the location block has its own.{' '}
-                        <a href="https://insightsplus.dev/docs/authentication#reverse-proxy" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-yellow-300 hover:text-yellow-200">
+                        <a href="https://github.com/leto1210/Unifi-Log-Insights/wiki" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-yellow-300 hover:text-yellow-200">
                           Full setup guide
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                         </a>
@@ -602,7 +602,7 @@ export default function SettingsSecurity({ onAuthEnabled }) {
             <div className="px-5 py-3">
               <p className="text-sm text-gray-500">
                 Token derived from SECRET_KEY, POSTGRES_PASSWORD, or DB_PASSWORD (first non-empty wins). If the secret changes, update your proxy config.{' '}
-                <a href="https://insightsplus.dev/docs/authentication#reverse-proxy" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-gray-400 hover:text-gray-300">
+                <a href="https://github.com/leto1210/Unifi-Log-Insights/wiki" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline text-gray-400 hover:text-gray-300">
                   Full setup guide
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                 </a>

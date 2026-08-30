@@ -1,6 +1,6 @@
 services:
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     container_name: unifi-log-insight
     restart: unless-stopped
     logging:

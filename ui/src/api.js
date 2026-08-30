@@ -458,7 +458,7 @@ export async function fetchLatestRelease(currentVersion) {
   // Beta builds: include pre-releases when finding the latest
   if (currentVersion && currentVersion.includes('-beta')) {
     const resp = await fetch(
-      'https://api.github.com/repos/jmasarweh/unifi-log-insight/releases?per_page=10'
+      'https://api.github.com/repos/leto1210/Unifi-Log-Insights/releases?per_page=10'
     )
     if (!resp.ok) return null
     const data = await resp.json()
@@ -470,7 +470,7 @@ export async function fetchLatestRelease(currentVersion) {
   // Stable builds: /releases/latest may return ext-v* releases, so fetch
   // a batch and find the first app release (v* without ext- prefix)
   const resp = await fetch(
-    'https://api.github.com/repos/jmasarweh/unifi-log-insight/releases?per_page=10'
+    'https://api.github.com/repos/leto1210/Unifi-Log-Insights/releases?per_page=10'
   )
   if (!resp.ok) return null
   const data = await resp.json()
@@ -481,7 +481,7 @@ export async function fetchLatestRelease(currentVersion) {
 
 export async function fetchAllReleases() {
   const resp = await fetch(
-    'https://api.github.com/repos/jmasarweh/unifi-log-insight/releases'
+    'https://api.github.com/repos/leto1210/Unifi-Log-Insights/releases'
   )
   if (!resp.ok) return null
   const data = await resp.json()

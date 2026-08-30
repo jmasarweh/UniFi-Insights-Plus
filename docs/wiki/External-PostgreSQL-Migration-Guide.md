@@ -241,7 +241,7 @@ If external DB setup fails after migration:
 ```yaml
 services:
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     ports:
       - "514:514/udp"
       - "8090:8000"
@@ -275,7 +275,7 @@ When both containers are in separate compose projects but need to communicate di
 ```yaml
 services:
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     environment:
       DB_HOST: "postgres-container-name"
       DB_PORT: "5432"
@@ -315,7 +315,7 @@ services:
       start_period: 30s
 
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -342,7 +342,7 @@ volumes:
 ```yaml
 services:
   unifi-log-insight:
-    image: ghcr.io/jmasarweh/unifi-log-insight:latest
+    image: ghcr.io/leto1210/unifi-log-insights:latest
     environment:
       DB_HOST: "mydb.us-east-1.rds.amazonaws.com"
       DB_PORT: "5432"
