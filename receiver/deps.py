@@ -18,6 +18,7 @@ from db import Database, build_conn_params, wait_for_postgres
 from enrichment import AbuseIPDBEnricher
 from unifi_api import UniFiAPI
 from pihole_api import PiHolePoller
+from technitium_api import TechnitiumPoller
 
 logger = logging.getLogger('api')
 
@@ -105,6 +106,10 @@ unifi_api = UniFiAPI(db=enricher_db)
 # ── Pi-hole Poller ─────────────────────────────────────────────────────────
 
 pihole_poller = PiHolePoller(db=enricher_db, enricher=None)
+
+# ── Technitium Poller ────────────────────────────────────────────────────────
+
+technitium_poller = TechnitiumPoller(db=enricher_db, enricher=None)
 
 # ── Caching ──────────────────────────────────────────────────────────────────
 
