@@ -16,7 +16,7 @@
 #        SECRET_KEY, TZ
 #      Optional: ABUSEIPDB_API_KEY, MAXMIND_ACCOUNT_ID, MAXMIND_LICENSE_KEY,
 #                UNIFI_HOST, UNIFI_API_KEY, AUTH_ENABLED, LOG_LEVEL,
-#                SSO_TRUSTED_HEADER, SSO_ADMIN_EMAILS
+#                SSO_TRUSTED_HEADER, SSO_PROXY_SECRET, SSO_ADMIN_EMAILS
 #   4. Deploy.
 #
 # When DB_HOST is anything other than localhost, the embedded PostgreSQL
@@ -69,8 +69,10 @@ services:
 
       # Optional: authentication
       AUTH_ENABLED: ${AUTH_ENABLED:-false}
-      # Optional: trusted-header SSO behind an authenticating proxy (see .env.example)
+      # Optional: trusted-header SSO behind an authenticating proxy (see .env.example).
+      # Requires AUTH_ENABLED=true and completed initial setup; ignored otherwise.
       SSO_TRUSTED_HEADER: ${SSO_TRUSTED_HEADER:-}
+      SSO_PROXY_SECRET: ${SSO_PROXY_SECRET:-}
       SSO_ADMIN_EMAILS: ${SSO_ADMIN_EMAILS:-}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]

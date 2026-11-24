@@ -65,20 +65,40 @@ AUTH_ENABLED = os.environ.get('AUTH_ENABLED', 'false').lower() in ('true', '1', 
 #
 # When an authenticating reverse proxy (oauth2-proxy, Authelia, …) sits in front
 # and has already verified the user, it can pass the user's email in a header.
-# The header is honoured ONLY on requests that also carry a valid
-# X-ULI-Proxy-Auth secret, so a client cannot forge it by talking to the app
-# directly. The proxy MUST strip any client-supplied copy of the header.
-# Unset SSO_TRUSTED_HEADER = feature off (upstream behaviour unchanged).
+# The header is honoured ONLY on requests that also carry:
+#   - a valid X-ULI-Proxy-Auth (the existing proxy trust), AND
+#   - X-ULI-SSO-Auth equal to SSO_PROXY_SECRET, a separate operator-chosen
+#     secret (>= 32 chars) that the app never returns in any response.
+# The second secret matters because the proxy-auth token is shown by the public
+# /api/auth/status endpoint until auth is enabled and never rotates; it must not
+# be enough to assert an identity. The proxy MUST strip any client-supplied copy
+# of the identity header. Unset SSO_TRUSTED_HEADER = feature off (upstream
+# behaviour unchanged); set but with a missing/short secret = off, logged.
 SSO_TRUSTED_HEADER = os.environ.get('SSO_TRUSTED_HEADER', '').strip().lower()
+SSO_PROXY_SECRET = os.environ.get('SSO_PROXY_SECRET', '')
+SSO_SECRET_HEADER = 'x-uli-sso-auth'
+_SSO_MIN_SECRET = 32
 SSO_ADMIN_EMAILS = {
     e.strip().lower() for e in os.environ.get('SSO_ADMIN_EMAILS', '').split(',') if e.strip()
 }
 _SSO_MAX_EMAIL = 100  # users.username is VARCHAR(100)
 
+if SSO_TRUSTED_HEADER and len(SSO_PROXY_SECRET) < _SSO_MIN_SECRET:
+    logger.error("SSO_TRUSTED_HEADER is set but SSO_PROXY_SECRET is missing or shorter than "
+                 "%d characters: trusted-header SSO is DISABLED", _SSO_MIN_SECRET)
+
+
+def _sso_secret_ok(request: Request) -> bool:
+    """True only when the request carries the SSO-specific shared secret."""
+    if len(SSO_PROXY_SECRET) < _SSO_MIN_SECRET:
+        return False
+    header = request.headers.get(SSO_SECRET_HEADER) or ''
+    return bool(header) and _hmac.compare_digest(SSO_PROXY_SECRET.encode(), header.encode())
+
 
 def _sso_email_from_request(request: Request) -> str | None:
     """Return the proxy-verified email, or None if SSO is off / untrusted / malformed."""
-    if not SSO_TRUSTED_HEADER or not _is_trusted_proxy(request):
+    if not SSO_TRUSTED_HEADER or not _is_trusted_proxy(request) or not _sso_secret_ok(request):
         return None
     email = (request.headers.get(SSO_TRUSTED_HEADER) or '').strip().lower()
     if not email or len(email) > _SSO_MAX_EMAIL or email.count('@') != 1:

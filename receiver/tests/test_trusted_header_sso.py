@@ -1,5 +1,8 @@
 """Tests for opt-in trusted-header SSO in routes/auth.py.
 
+A request asserts an identity only with BOTH the proxy-auth token and the
+separate SSO_PROXY_SECRET (X-ULI-SSO-Auth).
+
 routes.auth is imported with `db` and `deps` replaced by stubs, and the DB
 connection is a small fake that records SQL, so no Postgres is needed.
 """
@@ -15,6 +18,7 @@ import pytest
 
 PG = 'test-postgres-password'
 TOKEN = hmac.new(PG.encode(), b'proxy-auth', hashlib.sha256).hexdigest()
+SSO_SECRET = 'sso-shared-secret-0123456789abcdef'  # 34 chars
 ROLES = {'admin': 1, 'viewer': 2}
 
 
@@ -78,6 +82,7 @@ def auth(monkeypatch):
     store = {'users': {}, 'inserts': 0, 'commits': 0}
     monkeypatch.setenv('POSTGRES_PASSWORD', PG)
     monkeypatch.setenv('SSO_TRUSTED_HEADER', 'X-Auth-Request-Email')
+    monkeypatch.setenv('SSO_PROXY_SECRET', SSO_SECRET)
     monkeypatch.setenv('SSO_ADMIN_EMAILS', 'Boss@Example.com, other@example.com')
     deps = SimpleNamespace(get_conn=lambda: FakeConn(store), put_conn=lambda c: None,
                            enricher_db=MagicMock())
@@ -98,7 +103,8 @@ def req(headers, path='/api/logs'):
 
 
 def trusted(email):
-    return req({'X-ULI-Proxy-Auth': TOKEN, 'X-Auth-Request-Email': email})
+    return req({'X-ULI-Proxy-Auth': TOKEN, 'X-ULI-SSO-Auth': SSO_SECRET,
+                'X-Auth-Request-Email': email})
 
 
 class TestEmailExtraction:
@@ -109,7 +115,28 @@ class TestEmailExtraction:
         assert auth._sso_email_from_request(req({'X-Auth-Request-Email': 'jane@example.com'})) is None
 
     def test_header_ignored_with_wrong_proxy_secret(self, auth):
-        r = req({'X-ULI-Proxy-Auth': 'nope', 'X-Auth-Request-Email': 'jane@example.com'})
+        r = req({'X-ULI-Proxy-Auth': 'nope', 'X-ULI-SSO-Auth': SSO_SECRET,
+                 'X-Auth-Request-Email': 'jane@example.com'})
+        assert auth._sso_email_from_request(r) is None
+
+    def test_proxy_token_alone_is_not_enough(self, auth):
+        # The proxy-auth token can be disclosed by /api/auth/status before auth is
+        # enabled; it must never be sufficient to assert an identity.
+        r = req({'X-ULI-Proxy-Auth': TOKEN, 'X-Auth-Request-Email': 'boss@example.com'})
+        assert auth._sso_email_from_request(r) is None
+        assert auth._sso_user(r) is None
+        assert auth._test_store['inserts'] == 0
+
+    def test_wrong_sso_secret_rejected(self, auth):
+        r = req({'X-ULI-Proxy-Auth': TOKEN, 'X-ULI-SSO-Auth': SSO_SECRET[:-1] + 'X',
+                 'X-Auth-Request-Email': 'jane@example.com'})
+        assert auth._sso_email_from_request(r) is None
+
+    @pytest.mark.parametrize('secret', ['', 'too-short-secret'])
+    def test_feature_off_when_secret_missing_or_short(self, auth, monkeypatch, secret):
+        monkeypatch.setattr(auth, 'SSO_PROXY_SECRET', secret)
+        r = req({'X-ULI-Proxy-Auth': TOKEN, 'X-ULI-SSO-Auth': secret,
+                 'X-Auth-Request-Email': 'jane@example.com'})
         assert auth._sso_email_from_request(r) is None
 
     @pytest.mark.parametrize('bad', ['', 'jane', 'a@b@c.com', '@example.com', 'jane@localhost',
@@ -163,5 +190,5 @@ class TestRequireAuth:
     def test_require_auth_still_401_without_identity(self, auth, monkeypatch):
         monkeypatch.setattr(auth, '_auth_enabled', lambda: True)
         with pytest.raises(auth.HTTPException) as e:
-            auth.require_auth(req({'X-ULI-Proxy-Auth': TOKEN}))
+            auth.require_auth(req({'X-ULI-Proxy-Auth': TOKEN, 'X-ULI-SSO-Auth': SSO_SECRET}))
         assert e.value.status_code == 401
