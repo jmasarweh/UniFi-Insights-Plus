@@ -61,6 +61,89 @@ def _is_trusted_proxy(request: Request) -> bool:
 
 AUTH_ENABLED = os.environ.get('AUTH_ENABLED', 'false').lower() in ('true', '1', 'yes')
 
+# ── Trusted-header SSO (opt-in) ───────────────────────────────────────────────
+#
+# When an authenticating reverse proxy (oauth2-proxy, Authelia, …) sits in front
+# and has already verified the user, it can pass the user's email in a header.
+# The header is honoured ONLY on requests that also carry a valid
+# X-ULI-Proxy-Auth secret, so a client cannot forge it by talking to the app
+# directly. The proxy MUST strip any client-supplied copy of the header.
+# Unset SSO_TRUSTED_HEADER = feature off (upstream behaviour unchanged).
+SSO_TRUSTED_HEADER = os.environ.get('SSO_TRUSTED_HEADER', '').strip().lower()
+SSO_ADMIN_EMAILS = {
+    e.strip().lower() for e in os.environ.get('SSO_ADMIN_EMAILS', '').split(',') if e.strip()
+}
+_SSO_MAX_EMAIL = 100  # users.username is VARCHAR(100)
+
+
+def _sso_email_from_request(request: Request) -> str | None:
+    """Return the proxy-verified email, or None if SSO is off / untrusted / malformed."""
+    if not SSO_TRUSTED_HEADER or not _is_trusted_proxy(request):
+        return None
+    email = (request.headers.get(SSO_TRUSTED_HEADER) or '').strip().lower()
+    if not email or len(email) > _SSO_MAX_EMAIL or email.count('@') != 1:
+        return None
+    local, _, domain = email.partition('@')
+    if not local or '.' not in domain or any(c.isspace() for c in email):
+        return None
+    return email
+
+
+def _sso_user(request: Request) -> dict | None:
+    """Resolve (and on first visit, create) the user named by the trusted header.
+
+    New users get the 'viewer' role, or 'admin' when listed in SSO_ADMIN_EMAILS.
+    After creation the database is authoritative: role changes and deactivation
+    (is_active = false) are made on the user row. The password hash is random and
+    never disclosed, so SSO users cannot use the local login form.
+    """
+    email = _sso_email_from_request(request)
+    if not email:
+        return None
+    select_sql = """
+        SELECT u.id AS user_id, u.username, u.role_id, u.is_active,
+               r.name AS role_name, r.permissions
+        FROM users u JOIN roles r ON r.id = u.role_id
+        WHERE lower(u.username) = %s
+    """
+    created = False
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(select_sql, [email])
+            row = cur.fetchone()
+            if row is None:
+                role = 'admin' if email in SSO_ADMIN_EMAILS else 'viewer'
+                cur.execute("SELECT id FROM roles WHERE name = %s", [role])
+                role_row = cur.fetchone()
+                if not role_row:
+                    conn.rollback()
+                    return None
+                unusable = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12)).decode('utf-8')
+                cur.execute(
+                    """INSERT INTO users (username, password_hash, role_id)
+                       VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING""",
+                    [email, unusable, role_row['id']]
+                )
+                created = cur.rowcount == 1
+                cur.execute(select_sql, [email])
+                row = cur.fetchone()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("SSO user lookup failed")
+        return None
+    finally:
+        put_conn(conn)
+
+    if not row or not row.get('is_active'):
+        return None
+    if created:
+        logger.info("SSO: created %s user %s", row.get('role_name'), email)
+        _write_audit(row['user_id'], None, 'sso_user_created', {'role': row.get('role_name')},
+                     get_real_client_ip(request), request.headers.get('user-agent', '')[:500])
+    return dict(row)
+
 
 def get_real_client_ip(request: Request) -> str:
     """Resolve client IP from X-Forwarded-For if from trusted proxy."""
@@ -377,6 +460,11 @@ def require_auth(request: Request) -> dict | None:
         info = _validate_session(session_token)
         if info:
             return info
+
+    # Proxy-verified identity (trusted-header SSO, opt-in)
+    info = _sso_user(request)
+    if info:
+        return info
 
     raise HTTPException(401, "Authentication required")
 
