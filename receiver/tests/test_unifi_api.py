@@ -572,5 +572,6 @@ class TestSelectGatewayDeviceRealWorld:
              patch.object(api, '_get_integration_site', return_value={'data': []}):
             cfg = api.get_network_config()
         wan = [w for w in cfg['wan_interfaces'] if w['name'] == 'Internet 1'][0]
+        assert wan['detected_from'] == 'device'  # not the static fallback map
         assert wan['physical_interface'] == 'ppp0'
         assert wan['wan_ip'] == self.PUBLIC
