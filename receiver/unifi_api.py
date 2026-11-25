@@ -62,8 +62,13 @@ def _select_gateway_device(devices: list[dict], wan_ips=(), gateway_ips=()) -> d
     - its WAN/device IP is one of the known WAN IPs           (strong)
     - its IP is a configured network's gateway address        (strong)
     - it reports wan* objects carrying an IP                  (weak)
+    - it has an upstream UniFi device (``uplink.uplink_mac``)    (penalty)
     - its management IP is a plain LAN address that is *not*
       a gateway address, i.e. it hangs off another router     (penalty)
+
+    Note: on real sites (issue #147) Express units in AP mode reported type
+    ``udm`` and a wan3 object for a shared 5G tunnel, so neither the type nor
+    the presence of wan* keys is enough on its own.
 
     Returns the best candidate, or None when nothing looks like a gateway.
     """
@@ -86,10 +91,13 @@ def _select_gateway_device(devices: list[dict], wan_ips=(), gateway_ips=()) -> d
             score += 10
         if dev_type in _GATEWAY_DEVICE_TYPES:
             score += 5
+        uplink_mac = dev.get('uplink_mac') or (dev.get('uplink') or {}).get('uplink_mac')
+        if uplink_mac:
+            score -= 50  # wired to another UniFi device upstream -> not the edge
         mgmt_ip = dev.get('ip')
         if (gateway_ips and mgmt_ip and mgmt_ip not in gateway_ips
                 and mgmt_ip not in wan_ips and _is_private_ipv4(mgmt_ip)):
-            score -= 50
+            score -= 30
         if dev.get('state') not in (None, 1):
             score -= 1  # prefer online devices on otherwise equal footing
         if best_score is None or score > best_score:
@@ -1294,6 +1302,7 @@ class UniFiAPI:
                     # Used only for gateway detection (not persisted)
                     'lan_ip': d.get('connect_request_ip'),
                     'wan_ips': sorted(_device_wan_ips(d)),
+                    'uplink_mac': (d.get('uplink') or {}).get('uplink_mac'),
                 })
             return devices
         except Exception as e:

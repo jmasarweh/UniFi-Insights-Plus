@@ -520,3 +520,57 @@ class TestPollWanIpNaming:
             api.poll()
         assert api._ip_to_name['203.0.113.10'] == 'UCG-Fiber'
         api._db.set_config.assert_any_call('wan_ip_names', {'203.0.113.10': 'UCG-Fiber'})
+
+
+class TestSelectGatewayDeviceRealWorld:
+    """Shape of a real site from issue #147 (public IPs replaced by docs ranges):
+    UCG-Fiber + two Express 7 in AP mode. The Expresses report type 'udm' and
+    even a wan3 object (shared 5G GRE tunnel), so neither type nor the presence
+    of wan* keys identifies the gateway."""
+
+    PUBLIC = '203.0.113.5'
+    GW_IPS = {'192.168.178.1', '192.168.20.1', '192.168.30.1', '192.168.2.1',
+              '10.2.0.2', '192.168.178.20'}
+
+    def _raw(self):
+        def express(name, ip):
+            return {'name': name, 'model': 'UDMA69B', 'type': 'udm', 'state': 1,
+                    'ip': ip, 'connect_request_ip': ip,
+                    'wan3': {'ip': '10.153.249.11', 'uplink_ifname': 'gre1'},
+                    'uplink': {'type': 'wire', 'uplink_mac': '8c:ed:e1:00:00:01'}}
+        ucg = {'name': 'Cloud Gateway Fiber', 'model': 'UDMA6A8', 'type': 'udm',
+               'state': 1, 'ip': self.PUBLIC, 'connect_request_ip': '127.0.0.1',
+               'wan1': {'ip': self.PUBLIC, 'uplink_ifname': 'ppp0'},
+               'wan3': {'ip': '10.153.249.11', 'uplink_ifname': 'gre1'},
+               'uplink': {'type': 'wire', 'uplink_mac': None}}
+        return [express('Express 7 - 3D', '192.168.178.21'),
+                express('Express 7 - WZ', '192.168.178.22'), ucg]
+
+    def test_raw_stat_device(self):
+        gw = _select_gateway_device(self._raw(),
+                                    wan_ips={self.PUBLIC, '198.51.100.129'},
+                                    gateway_ips=self.GW_IPS)
+        assert gw['name'] == 'Cloud Gateway Fiber'
+
+    def test_without_wan_ip_hints(self):
+        # Even if WAN IPs are unknown, LAN-addressed Expresses lose.
+        gw = _select_gateway_device(self._raw(), gateway_ips=self.GW_IPS)
+        assert gw['name'] == 'Cloud Gateway Fiber'
+
+    def test_get_network_config_uses_real_gateway_wans(self, api):
+        responses = {
+            'rest/networkconf': {'data': [
+                {'name': 'Internet 1', 'purpose': 'wan', 'wan_networkgroup': 'WAN',
+                 'wan_type': 'pppoe'},
+                {'name': 'Default', 'purpose': 'corporate',
+                 'ip_subnet': '192.168.178.1/24'},
+            ]},
+            'stat/health': {'data': [{'subsystem': 'wan', 'wan_ip': self.PUBLIC}]},
+            'stat/device': {'data': self._raw()},
+        }
+        with patch.object(api, '_get', side_effect=lambda p, *a, **k: responses.get(p, {'data': []})), \
+             patch.object(api, '_get_integration_site', return_value={'data': []}):
+            cfg = api.get_network_config()
+        wan = [w for w in cfg['wan_interfaces'] if w['name'] == 'Internet 1'][0]
+        assert wan['physical_interface'] == 'ppp0'
+        assert wan['wan_ip'] == self.PUBLIC
