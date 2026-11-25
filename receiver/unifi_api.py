@@ -6,6 +6,7 @@ Phase 1: Settings, wizard network config, firewall policy management.
 Phase 2: Client/device polling, IP-to-device-name enrichment.
 """
 
+import ipaddress
 import logging
 import os
 import threading
@@ -31,6 +32,77 @@ _WAN_PHYSICAL_MAP = {
 }
 
 _EPOCH_MIN = datetime.min.replace(tzinfo=timezone.utc)
+
+# stat/device ``type`` values that *can* act as a gateway.  Note that UniFi
+# Express models report ``uxg`` even when adopted in access-point mode, so the
+# type alone is not proof that a device is the active gateway (issue #147).
+_GATEWAY_DEVICE_TYPES = ('ugw', 'udm', 'uxg')
+
+
+def _device_wan_ips(dev: dict) -> set[str]:
+    """Return the IPs reported in a raw stat/device entry's wan1/wan2/... objects."""
+    ips = set()
+    for key, val in dev.items():
+        if key.startswith('wan') and key[3:].isdigit() and isinstance(val, dict):
+            ip = val.get('ip')
+            if ip:
+                ips.add(ip)
+    return ips
+
+
+def _select_gateway_device(devices: list[dict], wan_ips=(), gateway_ips=()) -> dict | None:
+    """Pick the device that is actually operating as the site gateway.
+
+    ``devices`` are raw ``stat/device`` entries (or the normalized dicts from
+    ``_poll_devices``; both expose ``ip`` and wan* objects / ``wan_ips``).
+    A gateway-capable model (e.g. UniFi Express) adopted as an access point
+    sits on the LAN with a regular client address, so instead of taking the
+    first device whose type matches, candidates are scored:
+
+    - its WAN/device IP is one of the known WAN IPs           (strong)
+    - its IP is a configured network's gateway address        (strong)
+    - it reports wan* objects carrying an IP                  (weak)
+    - its management IP is a plain LAN address that is *not*
+      a gateway address, i.e. it hangs off another router     (penalty)
+
+    Returns the best candidate, or None when nothing looks like a gateway.
+    """
+    wan_ips = set(wan_ips or ())
+    gateway_ips = set(gateway_ips or ())
+    best, best_score = None, None
+    for dev in devices:
+        dev_type = dev.get('device_type') or dev.get('type')
+        dev_wan_ips = set(dev.get('wan_ips') or ()) | _device_wan_ips(dev)
+        if dev_type not in _GATEWAY_DEVICE_TYPES and not dev_wan_ips:
+            continue
+        own_ips = {ip for ip in (dev.get('ip'), dev.get('lan_ip'),
+                                 dev.get('connect_request_ip')) if ip}
+        score = 0
+        if wan_ips and (dev_wan_ips | own_ips) & wan_ips:
+            score += 100
+        if gateway_ips and own_ips & gateway_ips:
+            score += 50
+        if dev_wan_ips:
+            score += 10
+        if dev_type in _GATEWAY_DEVICE_TYPES:
+            score += 5
+        mgmt_ip = dev.get('ip')
+        if (gateway_ips and mgmt_ip and mgmt_ip not in gateway_ips
+                and mgmt_ip not in wan_ips and _is_private_ipv4(mgmt_ip)):
+            score -= 50
+        if dev.get('state') not in (None, 1):
+            score -= 1  # prefer online devices on otherwise equal footing
+        if best_score is None or score > best_score:
+            best, best_score = dev, score
+    return best
+
+
+def _is_private_ipv4(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.version == 4 and addr.is_private
 
 
 class UniFiPermissionError(Exception):
@@ -549,8 +621,20 @@ class UniFiAPI:
         device_wan_ips = {}   # networkgroup → ip (fallback when health missing)
         try:
             devices = self._get('stat/device')
-            for dev in devices.get('data', []):
-                # Find gateway by presence of wan* keys (no device-type filter)
+            known_wan_ips = {s.get('wan_ip') for s in wan_health.values()
+                             if s.get('wan_ip')}
+            known_wan_ips |= {n.get('wan_ip') for n in networks_raw
+                              if n.get('purpose') == 'wan' and n.get('wan_ip')}
+            known_gw_ips = {n['ip_subnet'].split('/')[0] for n in networks_raw
+                            if '/' in (n.get('ip_subnet') or '')}
+            # Pick the device actually acting as gateway — not merely the first
+            # one with wan* keys (an Express in AP mode may report them too).
+            candidates = [d for d in devices.get('data', [])
+                          if any(k.startswith('wan') and k[3:].isdigit() for k in d)]
+            gw_dev = _select_gateway_device(
+                candidates, wan_ips=known_wan_ips, gateway_ips=known_gw_ips,
+            ) or next(iter(candidates), None)
+            for dev in ([gw_dev] if gw_dev else []):
                 wan_keys = sorted(k for k in dev
                                   if k.startswith('wan') and k[3:].isdigit())
                 if not wan_keys:
@@ -1053,12 +1137,18 @@ class UniFiAPI:
             if self.features.get('network_config', True):
                 try:
                     net_config = self.get_network_config()
-                    # Find gateway device name from polled devices
-                    gateway_name = None
-                    for d in devices:
-                        if d.get('device_type') in ('ugw', 'udm', 'uxg'):
-                            gateway_name = d.get('device_name') or d.get('model')
-                            break
+                    # Find the device actually operating as gateway. Matching on
+                    # device_type alone picks e.g. an Express in AP mode (#147).
+                    wan_ip_by_iface, gateway_ip_vlans = (
+                        self.extract_network_identity_from_net_config(net_config))
+                    known_wan_ips = {w.get('wan_ip') for w in
+                                     net_config.get('wan_interfaces', [])
+                                     if w.get('wan_ip')}
+                    gw_dev = _select_gateway_device(
+                        devices, wan_ips=known_wan_ips,
+                        gateway_ips=gateway_ip_vlans.keys())
+                    gateway_name = (gw_dev.get('device_name') or gw_dev.get('model')
+                                    if gw_dev else None)
                     if gateway_name:
                         wan_ip_names = {}
                         for wan in net_config.get('wan_interfaces', []):
@@ -1069,8 +1159,6 @@ class UniFiAPI:
                         if wan_ip_names:
                             self._db.set_config('wan_ip_names', wan_ip_names)
                     # Persist WAN/gateway identity through shared helpers
-                    wan_ip_by_iface, gateway_ip_vlans = (
-                        self.extract_network_identity_from_net_config(net_config))
                     self._db.persist_network_identity(
                         wan_ip_by_iface=wan_ip_by_iface,
                         gateway_ip_vlans=gateway_ip_vlans,
@@ -1203,6 +1291,9 @@ class UniFiAPI:
                     'serial': d.get('serial'),
                     'state': d.get('state'),
                     'uptime': d.get('uptime'),
+                    # Used only for gateway detection (not persisted)
+                    'lan_ip': d.get('connect_request_ip'),
+                    'wan_ips': sorted(_device_wan_ips(d)),
                 })
             return devices
         except Exception as e:

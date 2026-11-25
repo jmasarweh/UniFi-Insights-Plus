@@ -436,3 +436,87 @@ class TestGetFirewallDataIdless:
 
         assert data['totalCount'] == 1
         assert not [r for r in caplog.records if 'without an id' in r.getMessage()]
+
+
+# ── Gateway device selection (issue #147) ────────────────────────────────────
+
+from unifi_api import _select_gateway_device  # noqa: E402
+
+
+class TestSelectGatewayDevice:
+    """An Express adopted in AP mode must not be mistaken for the gateway."""
+
+    PUBLIC_IP = '203.0.113.10'
+    GW_IPS = {'192.168.178.1', '10.10.20.1'}
+
+    def _express_ap(self, name='Express 7 - 3D', ip='192.168.178.21'):
+        return {'mac': 'aa:aa', 'device_type': 'uxg', 'device_name': name,
+                'ip': ip, 'state': 1}
+
+    def _ucg_fiber(self):
+        return {'mac': 'bb:bb', 'device_type': 'udm', 'device_name': 'UCG-Fiber',
+                'ip': self.PUBLIC_IP, 'lan_ip': '192.168.178.1',
+                'wan_ips': [self.PUBLIC_IP], 'state': 1}
+
+    def test_express_ap_listed_first_is_not_chosen(self):
+        devices = [self._express_ap(), self._express_ap('Express 7 - EG', '192.168.178.22'),
+                   self._ucg_fiber()]
+        gw = _select_gateway_device(devices, wan_ips={self.PUBLIC_IP},
+                                    gateway_ips=self.GW_IPS)
+        assert gw['device_name'] == 'UCG-Fiber'
+
+    def test_gateway_ip_match_without_wan_info(self):
+        gw_dev = {'mac': 'cc', 'device_type': 'udm', 'device_name': 'GW',
+                  'ip': '192.168.178.1'}
+        gw = _select_gateway_device([self._express_ap(), gw_dev],
+                                    gateway_ips=self.GW_IPS)
+        assert gw['device_name'] == 'GW'
+
+    def test_raw_stat_device_wan_objects(self):
+        express = {'type': 'uxg', 'name': 'Express', 'ip': '192.168.178.21',
+                   'wan1': {'ip': '192.168.178.21'}}
+        ucg = {'type': 'udm', 'name': 'UCG', 'ip': self.PUBLIC_IP,
+               'wan1': {'ip': self.PUBLIC_IP, 'uplink_ifname': 'eth6'}}
+        gw = _select_gateway_device([express, ucg], wan_ips={self.PUBLIC_IP},
+                                    gateway_ips=self.GW_IPS)
+        assert gw['name'] == 'UCG'
+
+    def test_single_express_as_real_gateway_still_works(self):
+        express_gw = {'mac': 'dd', 'device_type': 'uxg', 'device_name': 'Express GW',
+                      'ip': self.PUBLIC_IP, 'wan_ips': [self.PUBLIC_IP]}
+        gw = _select_gateway_device([express_gw], wan_ips={self.PUBLIC_IP},
+                                    gateway_ips=self.GW_IPS)
+        assert gw['device_name'] == 'Express GW'
+
+    def test_no_gateway_candidates(self):
+        ap = {'mac': 'ee', 'device_type': 'uap', 'device_name': 'U7', 'ip': '192.168.178.30'}
+        assert _select_gateway_device([ap]) is None
+
+    def test_fallback_without_hints_keeps_first_gateway_type(self):
+        a = {'device_type': 'udm', 'device_name': 'A', 'ip': '192.168.1.1'}
+        b = {'device_type': 'uxg', 'device_name': 'B', 'ip': '192.168.1.2'}
+        assert _select_gateway_device([a, b])['device_name'] == 'A'
+
+
+class TestPollWanIpNaming:
+    """poll() must map the WAN IP to the real gateway's name (issue #147)."""
+
+    def test_wan_ip_named_after_real_gateway(self, api):
+        api.features = {'client_names': False, 'device_discovery': True,
+                        'network_config': True}
+        devices = [
+            {'mac': 'aa', 'ip': '192.168.178.21', 'device_name': 'Express 7 - 3D',
+             'device_type': 'uxg', 'state': 1, 'lan_ip': None, 'wan_ips': []},
+            {'mac': 'bb', 'ip': '203.0.113.10', 'device_name': 'UCG-Fiber',
+             'device_type': 'udm', 'state': 1, 'lan_ip': '192.168.178.1',
+             'wan_ips': ['203.0.113.10']},
+        ]
+        net_config = {
+            'wan_interfaces': [{'physical_interface': 'eth6', 'wan_ip': '203.0.113.10'}],
+            'networks': [{'ip_subnet': '192.168.178.1/24', 'vlan': None, 'name': 'Default'}],
+        }
+        with patch.object(api, '_poll_devices', return_value=devices), \
+             patch.object(api, 'get_network_config', return_value=net_config):
+            api.poll()
+        assert api._ip_to_name['203.0.113.10'] == 'UCG-Fiber'
+        api._db.set_config.assert_any_call('wan_ip_names', {'203.0.113.10': 'UCG-Fiber'})
